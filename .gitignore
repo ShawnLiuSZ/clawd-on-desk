@@ -46,6 +46,8 @@ docs/**
 !docs/superpowers/
 !docs/superpowers/specs/
 !docs/superpowers/specs/2026-06-12-qq-multiselect-elicitation-design.md
+!docs/superpowers/plans/
+!docs/superpowers/plans/2026-06-12-qq-multiselect-elicitation.md
 !docs/releases/
 !docs/releases/release-v0.5.5.md
 !docs/releases/release-v0.6.0.md
