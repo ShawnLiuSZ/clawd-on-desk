@@ -533,4 +533,23 @@ describe("qq-approval: requestElicitation", () => {
     assert.strictEqual(resolvedAnswers["多选?"], "A");
     assert.strictEqual(resolvedAnswers["单选?"], "Y");
   });
+
+  it("backward-compat: no multiSelect question still resolves on first tap", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+    const perm = makePermEntry({
+      toolInput: { questions: [
+        { question: "选一个?", options: [{ label: "甲" }, { label: "乙" }] }, // 无 multiSelect
+      ]},
+    });
+    bridge.requestElicitation(perm, (_, answers) => { resolvedAnswers = answers; }, {});
+    const permId = bridge._testGetFirstPermId();
+
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:1" }); // 点「乙」立即 resolve
+
+    assert.ok(resolvedAnswers, "resolved immediately without a submit step");
+    assert.strictEqual(resolvedAnswers["选一个?"], "乙");
+    assert.strictEqual(bridge.hasPending(), false);
+  });
 });
