@@ -1022,6 +1022,7 @@ function dismissPermissionForTerminal(perm) {
   // Cancel before splicing so a late Telegram decision can't slip in between
   // the splice and the abort.
   cancelRemoteApproval(perm);
+  cancelQQApproval(perm);
   const idx = pendingPermissions.indexOf(perm);
   if (idx !== -1) {
     pendingPermissions.splice(idx, 1);
@@ -1104,6 +1105,50 @@ function maybeStartRemoteApproval(permEntry) {
   return true;
 }
 
+function getQQApprovalBridge() {
+  if (typeof ctx.getQQApprovalBridge === "function") {
+    try { return ctx.getQQApprovalBridge(); } catch (err) {
+      permLog(`qq approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.qqApprovalBridge || null;
+}
+
+function cancelQQApproval(permEntry) {
+  const bridge = getQQApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
+function maybeStartRemoteQQApproval(permEntry) {
+  if (!isRemoteApprovalActionable(permEntry)) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const bridge = getQQApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  // start() is idempotent and subscribes the button/text-reply listeners — it
+  // MUST run before a request or callbacks are never delivered. (The previous
+  // `!bridge.hasPending` guard negated a function reference, so it never ran.)
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
+    ? ctx.getQQBotConfig()
+    : (ctx.qqBotConfig || null);
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    resolvePermissionEntry(entry, behavior);
+  };
+  try {
+    bridge.requestApproval(permEntry, resolveFn, qqConfig);
+  } catch (err) {
+    permLog(`qq remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
 function applyPermissionSuggestion(perm, index, options = {}) {
   const suggestion = perm && Array.isArray(perm.suggestions) ? perm.suggestions[index] : null;
   if (!suggestion) return false;
@@ -1139,6 +1184,10 @@ function applyPermissionSuggestion(perm, index, options = {}) {
   const idx = pendingPermissions.indexOf(permEntry);
   if (idx === -1) return;
   cancelRemoteApproval(permEntry);
+  // Symmetric with Telegram: once a decision is made (here, or via the desktop
+  // bubble), retract the parallel QQ approval so its card can't still be acted
+  // on. No-op when QQ itself resolved (entry already removed from the bridge).
+  cancelQQApproval(permEntry);
 
   // Minimum display time: if bubble just appeared and dismiss is automatic
   // (client disconnect / terminal answer), delay so user can see it briefly
@@ -1750,6 +1799,7 @@ function dismissInteractivePermissionWithoutDecision(perm, reason) {
     notifyPermissionsChanged("dismissed");
   }
   cancelRemoteApproval(perm);
+  cancelQQApproval(perm);
   if (perm._delayTimer) { clearTimeout(perm._delayTimer); perm._delayTimer = null; }
   if (perm.autoCloseTimer) { clearTimeout(perm.autoCloseTimer); perm.autoCloseTimer = null; }
   if (perm.abortHandler && perm.res) {
@@ -1885,6 +1935,7 @@ return {
   pendingPermissions, PASSTHROUGH_TOOLS,
   addPendingPermission, removePendingPermission,
   maybeStartRemoteApproval,
+  maybeStartRemoteQQApproval,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,

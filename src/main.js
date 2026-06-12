@@ -29,6 +29,10 @@ const {
 } = require("./telegram-approval-runtime-status");
 const { createTelegramMigrationController } = require("./telegram-migration-controller");
 const { createTelegramSidecarStatusBridge } = require("./telegram-sidecar-status-bridge");
+const { createQQBotClient } = require("./qq-bot-client");
+const { createQQApprovalBridge } = require("./qq-approval");
+const { normalizeQQBot } = require("./qq-bot-settings");
+const WebSocket = require("ws");
 const initUpdateBubble = require("./update-bubble");
 const { registerUpdateBubbleIpc } = initUpdateBubble;
 const createSettingsAnimationOverridesMain = require("./settings-animation-overrides-main");
@@ -283,6 +287,7 @@ const _settingsController = createSettingsController({
     getTelegramApprovalTokenInfo: () => getTelegramApprovalTokenInfo(),
     sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     deleteTelegramApprovalTokenFile: () => deleteTelegramApprovalTokenFile(),
+    testQQBotConnection: () => testQQBotConnection(),
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1101,6 +1106,99 @@ const {
   isCodexNativeNotificationSoundEnabled: _isCodexNativeNotificationSoundEnabled,
   isCodexPermissionInterceptEnabled: _isCodexPermissionInterceptEnabled,
 } = require("./agent-gate");
+
+let _qqBotClient = null;
+let _qqApprovalBridge = null;
+let _qqBotOpenidListenerInstalled = false;
+
+function persistQQBotOpenidToSettings(newOpenid) {
+  if (!_settingsController || !newOpenid) return;
+  const current = _settingsController.get("qqBot");
+  if (!current || !current.enabled) return;
+  if (current.userOpenid === newOpenid) return;
+  try {
+    _settingsController.applyUpdate("qqBot", {
+      ...(current || {}),
+      userOpenid: newOpenid,
+    });
+    console.log(`qq-bot: auto-discovered openid persisted to settings — ${String(newOpenid).slice(0, 12)}…`);
+  } catch (err) {
+    console.log(`qq-bot: persist openid failed — ${err && err.message ? err.message : String(err)}`);
+  }
+}
+
+function getOrCreateQQBotClient() {
+  const qqConfig = _settingsController ? _settingsController.get("qqBot") : null;
+  if (!qqConfig || !qqConfig.enabled) {
+    _qqBotClient = null;
+    return null;
+  }
+  const normalized = normalizeQQBot(qqConfig);
+  if (_qqBotClient) {
+    _qqBotClient.updateConfig(normalized);
+    return _qqBotClient;
+  }
+  _qqBotClient = createQQBotClient(normalized, { log: console.log, WebSocket });
+  if (!_qqBotOpenidListenerInstalled && typeof _qqBotClient.onOpenidDiscovered === "function") {
+    _qqBotClient.onOpenidDiscovered((openid) => persistQQBotOpenidToSettings(openid));
+    _qqBotOpenidListenerInstalled = true;
+  }
+  _qqBotClient.connectWs().catch((err) => {
+    console.log(`qq-bot: ws connect failed — ${err && err.message ? err.message : String(err)}`);
+  });
+  return _qqBotClient;
+}
+
+function getOrCreateQQApprovalBridge() {
+  if (_qqApprovalBridge) return _qqApprovalBridge;
+  const client = getOrCreateQQBotClient();
+  if (!client) return null;
+  _qqApprovalBridge = createQQApprovalBridge(client, { log: console.log });
+  // Subscribe button + text-reply listeners up front so callbacks resolve even
+  // for the very first approval.
+  try { _qqApprovalBridge.start(); } catch (err) {
+    console.log(`qq-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+  return _qqApprovalBridge;
+}
+
+async function testQQBotConnection() {
+  const qqConfig = _settingsController ? _settingsController.get("qqBot") : null;
+  if (!qqConfig || !qqConfig.enabled) {
+    return { status: "error", message: "QQ Bot is not enabled" };
+  }
+  const normalized = normalizeQQBot(qqConfig);
+  if (!normalized.appId || !normalized.appSecret) {
+    return { status: "error", message: "QQ Bot configuration is incomplete" };
+  }
+  const client = getOrCreateQQBotClient();
+  if (!client) {
+    return { status: "error", message: "QQ Bot client failed to initialize" };
+  }
+  try {
+    const token = await client.getToken();
+    if (!token) {
+      return { status: "error", message: "Failed to get access_token" };
+    }
+    const discovered = client.getDiscoveredOpenid() || "";
+    if (discovered) {
+      try {
+        await client.sendTextMessage("🟢 QQ Bot connection test successful from Clawd.");
+        return { status: "ok", message: "QQ Bot connected and test message sent." };
+      } catch (sendErr) {
+        return { status: "ok", message: `Token OK, but sending failed: ${sendErr && sendErr.message || "unknown"}. ` +
+          "Open a C2C chat with the bot and retry." };
+      }
+    }
+    return {
+      status: "ok",
+      message: "Token OK. OpenID not discovered yet — open a C2C chat with the bot, send any message, then retry.",
+    };
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "Unknown error" };
+  }
+}
+
 const _permCtx = {
   get win() { return win; },
   get lang() { return lang; },
@@ -1141,6 +1239,12 @@ const _permCtx = {
   clearShortcutFailure: (actionId) => shortcutRuntime.clearFailure(actionId),
   repositionUpdateBubble: () => repositionUpdateBubble(),
   getTelegramApprovalClient: () => getTelegramApprovalClient(),
+  getQQApprovalBridge: () => getOrCreateQQApprovalBridge(),
+  getQQBotConfig: () => {
+    if (!_settingsController) return null;
+    const qqConfig = _settingsController.get("qqBot");
+    return qqConfig ? normalizeQQBot(qqConfig) : null;
+  },
   onPermissionsChanged: () => {
     if (hardwareBuddyAdapter) hardwareBuddyAdapter.notifyPermissionsChanged();
   },
@@ -1150,7 +1254,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -1573,6 +1677,7 @@ const _serverCtx = {
   removePendingPermission,
   showPermissionBubble,
   maybeStartRemoteApproval,
+  maybeStartRemoteQQApproval,
   replyOpencodePermission,
   permLog,
 };
@@ -2827,6 +2932,26 @@ _settingsController.subscribeKey("tgApproval", () => {
   if (suppressTelegramApprovalSidecarSync > 0) return;
   queueTelegramApprovalSidecarSync("settings");
 });
+_settingsController.subscribeKey("qqBot", () => {
+  const qqConfig = _settingsController ? _settingsController.get("qqBot") : null;
+  if (qqConfig && qqConfig.enabled) {
+    getOrCreateQQBotClient();
+  } else {
+    if (_qqBotClient) {
+      _qqBotClient.disconnect();
+      _qqBotClient = null;
+      _qqBotOpenidListenerInstalled = false;
+    }
+  }
+});
+// Startup: if QQ Bot was already enabled, bring WS online now.
+// The subscriber only fires on change, not on initial value.
+{
+  const qqConfig = _settingsController ? _settingsController.get("qqBot") : null;
+  if (qqConfig && qqConfig.enabled) {
+    getOrCreateQQBotClient();
+  }
+}
 _settingsController.subscribeKey("mobilePreviewEnabled", async (enabled) => {
   if (enabled) {
     if (!_lanWss) {
