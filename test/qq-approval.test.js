@@ -569,3 +569,63 @@ describe("qq-approval: requestElicitation", () => {
     assert.strictEqual(bridge.hasPending(), false);
   });
 });
+
+describe("qq-approval: sender identity enforcement", () => {
+  it("ignores an interaction whose userOpenid does not match the authorized anchor", () => {
+    const client = makeMockQQBotClient();
+    let resolved = null;
+    const bridge = createBridge(client, { getAuthorizedOpenid: () => "owner-openid" });
+    bridge.requestApproval(makePermEntry(), (_, b) => { resolved = b; }, {});
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "allow",
+      userOpenid: "attacker-openid",
+    });
+    assert.strictEqual(resolved, null);
+    assert.strictEqual(bridge.pendingCount(), 1);
+  });
+
+  it("resolves an interaction whose userOpenid matches the authorized anchor", () => {
+    const client = makeMockQQBotClient();
+    let resolved = null;
+    const bridge = createBridge(client, { getAuthorizedOpenid: () => "owner-openid" });
+    bridge.requestApproval(makePermEntry(), (_, b) => { resolved = b; }, {});
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "allow",
+      userOpenid: "owner-openid",
+    });
+    assert.strictEqual(resolved, "allow");
+  });
+
+  it("ignores a text reply from a non-authorized sender", () => {
+    const client = makeMockQQBotClient();
+    let resolved = null;
+    const bridge = createBridge(client, { getAuthorizedOpenid: () => "owner-openid" });
+    bridge.requestApproval(makePermEntry(), (_, b) => { resolved = b; }, {});
+    bridge._testHandleTextReply({ text: "y", userOpenid: "attacker-openid" });
+    assert.strictEqual(resolved, null);
+  });
+
+  it("fails closed: rejects decisions when the anchor is empty", () => {
+    const client = makeMockQQBotClient();
+    let resolved = null;
+    const bridge = createBridge(client, { getAuthorizedOpenid: () => "" });
+    bridge.requestApproval(makePermEntry(), (_, b) => { resolved = b; }, {});
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "allow",
+      userOpenid: "anyone",
+    });
+    assert.strictEqual(resolved, null);
+  });
+
+  it("does not enforce when no getAuthorizedOpenid option is supplied (back-compat)", () => {
+    const client = makeMockQQBotClient();
+    let resolved = null;
+    const bridge = createBridge(client);
+    bridge.requestApproval(makePermEntry(), (_, b) => { resolved = b; }, {});
+    bridge._testHandleInteraction({ permId: bridge._testGetFirstPermId(), behavior: "allow" });
+    assert.strictEqual(resolved, "allow");
+  });
+});

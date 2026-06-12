@@ -42,6 +42,19 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
   const logFn = typeof options.log === "function" ? options.log : () => {};
   const nowFn = typeof options.now === "function" ? options.now : () => Date.now();
 
+  const getAuthorizedOpenid =
+    typeof options.getAuthorizedOpenid === "function" ? options.getAuthorizedOpenid : null;
+
+  // Enforcement is active only when the host wires an anchor getter (production
+  // path). With no getter, behave as before (keeps unit tests host-agnostic).
+  // Fail-closed: a known getter that returns empty rejects every decision.
+  function isAuthorizedSender(senderOpenid) {
+    if (!getAuthorizedOpenid) return true;
+    const authorized = String(getAuthorizedOpenid() || "").trim();
+    if (!authorized) return false;
+    return String(senderOpenid || "").trim() === authorized;
+  }
+
   const pendingApprovals = new Map();
   const shortCodeToPermId = new Map();
   let interactionUnsub = null;
@@ -87,6 +100,10 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
   function handleTextReply(message) {
     const parsed = parseTextReply(message && message.text);
     if (!parsed) return;
+    if (!isAuthorizedSender(message && message.userOpenid)) {
+      logFn("qq-approval: ignored text reply from non-authorized sender");
+      return;
+    }
     let permId = null;
     if (parsed.code) {
       permId = shortCodeToPermId.get(parsed.code) || null;
@@ -102,6 +119,10 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     if (!event || !event.permId) return;
     const entry = pendingApprovals.get(event.permId);
     if (!entry) return;
+    if (!isAuthorizedSender(event.userOpenid)) {
+      logFn(`qq-approval: ignored interaction from non-authorized sender for permId=${event.permId}`);
+      return;
+    }
 
     // Elicitation button clicks encode "elicitation:<qi>:<oi>" in behavior.
     if (entry.isElicitation && event.behavior) {
