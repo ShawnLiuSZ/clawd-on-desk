@@ -509,4 +509,28 @@ describe("qq-approval: requestElicitation", () => {
     assert.strictEqual(bridge.hasPending(), true, "still pending");
     assert.ok(sendCalls > before + 1, "warning card re-sent on incomplete submit");
   });
+
+  it("multi-select card: a non-multi question replaces selection (radio)", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+    const perm = makePermEntry({
+      toolInput: { questions: [
+        { question: "多选?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
+        { question: "单选?", options: [{ label: "X" }, { label: "Y" }] }, // 无 multiSelect
+      ]},
+    });
+    bridge.requestElicitation(perm, (_, answers) => { resolvedAnswers = answers; }, {});
+    const permId = bridge._testGetFirstPermId();
+
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:0" }); // 多选题选 A
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:1:0" }); // 单选题选 X
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:1:1" }); // 单选题改选 Y（替换）
+
+    assert.deepStrictEqual(bridge._testGetFirstEntry().selections[1], [1], "single-select replaced, not accumulated");
+
+    bridge._testHandleInteraction({ permId, behavior: "elicitation-submit" });
+    assert.strictEqual(resolvedAnswers["多选?"], "A");
+    assert.strictEqual(resolvedAnswers["单选?"], "Y");
+  });
 });
