@@ -624,6 +624,16 @@ describe("qq-bot-client: anchor pinning", () => {
     assert.strictEqual(seen.text, "y");
     assert.strictEqual(seen.userOpenid, "attacker");
   });
+
+  it("surfaces empty openid (fail-closed) when a C2C message has content but no extractable sender", () => {
+    const client = createQQBotClient({ appId: "12345678", appSecret: "s", userOpenid: "owner" }, { log: () => {} });
+    let seen = null;
+    client.onMessage((m) => { seen = m; });
+    // content present, but no author/openid fields anywhere → extraction yields ""
+    client._testHandleC2CMessage({ content: "y" });
+    assert.strictEqual(seen.text, "y");
+    assert.strictEqual(seen.userOpenid, ""); // must NOT fall back to the stored anchor
+  });
 });
 
 describe("qq-bot-client: message listener (text-reply fallback)", () => {

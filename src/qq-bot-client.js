@@ -599,10 +599,11 @@ function createQQBotClient(config, options = {}) {
     // replies (the fallback when QQ buttons aren't tappable on a client).
     const text = eventData && typeof eventData.content === "string" ? eventData.content.trim() : "";
     if (text) {
-      // Surface the REAL inbound sender openid (discoveredOpenid), not the stored
-      // anchor, so the approval bridge can reject non-authorized senders.
+      // Surface only the REAL inbound sender openid (discoveredOpenid).
+      // When extraction failed, discoveredOpenid is "" — the approval bridge
+      // receives "" and its identity check fails closed (no fallback to the anchor).
       for (const listener of messageListeners) {
-        try { listener({ text, userOpenid: discoveredOpenid || userOpenid }); }
+        try { listener({ text, userOpenid: discoveredOpenid }); }
         catch (err) { logFn(`qq-bot: message listener error: ${compactLog(err, 100)}`); }
       }
     }
