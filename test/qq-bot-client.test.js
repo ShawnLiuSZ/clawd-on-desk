@@ -227,6 +227,35 @@ describe("qq-bot-client: buildApprovalCard", () => {
     assert.ok(sug.render_data.label.includes(longTool), "full tool name preserved");
   });
 
+  it("localizes Allow/Deny buttons per getLang", () => {
+    const zh = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost(), getLang: () => "zh" });
+    const card = zh.buildApprovalCard("Bash", { command: "ls" }, "s", "qq_p", [], "AB");
+    const labels = card.keyboard.content.rows.flatMap((r) => r.buttons).map((b) => b.render_data.label);
+    assert.ok(labels.some((l) => l.includes("批准")), "allow localized to zh");
+    assert.ok(labels.some((l) => l.includes("拒绝")), "deny localized to zh");
+  });
+
+  it("localizes suggestion button labels per getLang", () => {
+    const zh = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost(), getLang: () => "zh" });
+    const card = zh.buildApprovalCard("Bash", {}, "s", "qq_p", [
+      { type: "setMode", mode: "acceptEdits" },
+      { type: "addRules", behavior: "deny", toolName: "Write" },
+    ], "AB");
+    const labels = card.keyboard.content.rows.flatMap((r) => r.buttons).map((b) => b.render_data.label);
+    assert.ok(labels.some((l) => l.includes("自动编辑")), "acceptEdits localized");
+    assert.ok(labels.some((l) => l.includes("始终拒绝 Write")), "deny-rule localized");
+  });
+
+  it("defaults to English button text when no getLang is provided", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const card = client.buildApprovalCard("Bash", {}, "s", "qq_p", [
+      { type: "addRules", behavior: "allow", toolName: "Bash" },
+    ], "AB");
+    const labels = card.keyboard.content.rows.flatMap((r) => r.buttons).map((b) => b.render_data.label);
+    assert.ok(labels.some((l) => l.includes("Allow")), "default allow is English");
+    assert.ok(labels.some((l) => l.includes("Always Bash")), "default suggestion is English");
+  });
+
   it("lists full suggestion text in the body so long labels survive button truncation", () => {
     const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
     const longTool = "X".repeat(80);
@@ -406,7 +435,7 @@ describe("qq-bot-client: buildElicitationCard", () => {
   });
 
   it("multi-select: marks selected options and adds a submit button", () => {
-    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost(), getLang: () => "zh" });
     const toolInput = {
       questions: [
         { header: "部署", question: "选哪些环境?", multiSelect: true, options: [
@@ -424,7 +453,8 @@ describe("qq-bot-client: buildElicitationCard", () => {
     const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
     const submit = buttons.find((b) => b.action.data === "qq_p|elicitation-submit");
     assert.ok(submit, "submit button exists with elicitation-submit behavior");
-    assert.ok(submit.render_data.label.includes("已选 2"), "submit label shows selected count");
+    assert.ok(submit.render_data.label.includes("完成") && submit.render_data.label.includes("2"),
+      "submit label shows localized done + selected count");
     // option buttons keep elicitation:<qi>:<oi> encoding
     assert.ok(buttons.some((b) => b.action.data === "qq_p|elicitation:0:0"));
   });

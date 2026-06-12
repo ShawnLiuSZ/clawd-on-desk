@@ -16,6 +16,7 @@
 const https = require("https");
 const http = require("http");
 const { URL } = require("url");
+const { qqCardText } = require("./qq-bot-i18n");
 
 const TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken";
 const API_BASE = "https://api.sgroup.qq.com";
@@ -127,6 +128,8 @@ function createQQBotClient(config, options = {}) {
   const WebSocketCtor = options.WebSocket || null;
   const httpPostFn = options.httpPost || httpPost;
   const httpPutFn = options.httpPut || httpPut;
+  const getLang = typeof options.getLang === "function" ? options.getLang : () => "en";
+  const tr = (key, params) => qqCardText(getLang(), key, params);
 
   let appId = config.appId || "";
   let appSecret = config.appSecret || "";
@@ -308,10 +311,10 @@ function createQQBotClient(config, options = {}) {
     // If the suggestion already has a label, use it (e.g. from CodeBuddy).
     if (s.label && typeof s.label === "string" && s.label.trim()) return s.label.trim();
     if (s.type === "setMode") {
-      if (s.mode === "acceptEdits") return "Auto edits";
-      if (s.mode === "plan") return "Plan mode";
+      if (s.mode === "acceptEdits") return tr("autoEdits");
+      if (s.mode === "plan") return tr("planMode");
       const mode = mdSafe(s.mode || "");
-      return mode ? `Mode: ${mode}` : "";
+      return mode ? tr("modePrefix", { mode }) : "";
     }
     if (s.type === "addRules") {
       const rules = Array.isArray(s.rules) ? s.rules : [s];
@@ -319,8 +322,8 @@ function createQQBotClient(config, options = {}) {
       const behavior = mdSafe(s.behavior || first.behavior || "allow");
       const isDeny = behavior === "deny";
       const toolName = mdSafe(first.toolName || s.toolName || "");
-      if (toolName) return isDeny ? `Always deny ${toolName}` : `Always ${toolName}`;
-      return isDeny ? "Always deny" : "Always allow";
+      if (toolName) return isDeny ? tr("alwaysDenyTool", { tool: toolName }) : tr("alwaysTool", { tool: toolName });
+      return isDeny ? tr("alwaysDeny") : tr("alwaysAllow");
     }
     return "";
   }
@@ -355,8 +358,8 @@ function createQQBotClient(config, options = {}) {
       : "点击下方按钮选择");
 
     const buttons = [
-      makeButton("1", "✅ Allow", permId, "allow", 1),
-      makeButton("2", "❌ Deny", permId, "deny", 0),
+      makeButton("1", `✅ ${tr("allow")}`, permId, "allow", 1),
+      makeButton("2", `❌ ${tr("deny")}`, permId, "deny", 0),
     ];
     sugLabels.forEach((label, i) => {
       buttons.push(makeButton(String(3 + i), `📋 ${i + 1}. ${label}`, permId, `suggestion:${i}`, 0));
@@ -494,7 +497,7 @@ function createQQBotClient(config, options = {}) {
 
     const submitButton = makeButton(
       String(buttonId++),
-      `✅ 完成 (已选 ${totalSelected})`,
+      `✅ ${tr("submitDone", { n: totalSelected })}`,
       permId,
       "elicitation-submit",
       1
