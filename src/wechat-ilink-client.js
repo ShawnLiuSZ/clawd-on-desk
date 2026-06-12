@@ -107,22 +107,20 @@ async function fetchQrcode(baseUrl = DEFAULT_BASE_URL) {
   }
   const qrcode = body.qrcode;
 
-  // Generate a reliable QR image locally using the qrcode npm package.
-  // The ilink API's qrcode_img_content format is unreliable, so we always
-  // generate our own from the qrcode key.
+  // qrcode_img_content is a URL (e.g. https://liteapp.weixin.qq.com/q/xxx?qrcode=yyy)
+  // that WeChat scans — encode it into a QR code image.
+  const qrContent = (body.qrcode_img_content && typeof body.qrcode_img_content === "string")
+    ? body.qrcode_img_content.trim()
+    : "";
+
   let qrcodeImg = "";
-  try {
-    const QRCode = require("qrcode");
-    qrcodeImg = await QRCode.toDataURL(qrcode, { width: 200, margin: 2, errorCorrectionLevel: "M" });
-  } catch (err) {
-    // Fallback: use the API response field if local generation fails
-    qrcodeImg = (body.qrcode_img_content && typeof body.qrcode_img_content === "string")
-      ? body.qrcode_img_content.trim() : "";
-    if (!qrcodeImg && body.url && typeof body.url === "string") {
-      qrcodeImg = body.url.trim();
-    }
-    if (!qrcodeImg) {
-      qrcodeImg = `${baseUrl}/ilink/bot/qrcode?qrcode=${encodeURIComponent(qrcode)}`;
+  if (qrContent) {
+    try {
+      const QRCode = require("qrcode");
+      qrcodeImg = await QRCode.toDataURL(qrContent, { width: 200, margin: 2, errorCorrectionLevel: "M" });
+    } catch {
+      // Local generation failed — use the URL directly (won't render as image but at least logged)
+      qrcodeImg = qrContent;
     }
   }
 
