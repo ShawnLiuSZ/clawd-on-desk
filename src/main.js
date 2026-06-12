@@ -1174,8 +1174,10 @@ async function getWechatQrcode() {
   try {
     const { fetchQrcode } = require("./wechat-ilink-client");
     const result = await fetchQrcode(config.baseUrl);
+    console.log("wechat-qrcode: raw response qrcodeImg length:", (result.qrcodeImg || "").length, "first 50 chars:", String(result.qrcodeImg || "").slice(0, 50));
     return { status: "ok", qrcodeImg: result.qrcodeImg, qrcode: result.qrcode };
   } catch (err) {
+    console.log("wechat-qrcode: fetch failed:", err && err.message);
     return { status: "error", message: err && err.message ? err.message : "Failed to get QR code" };
   }
 }

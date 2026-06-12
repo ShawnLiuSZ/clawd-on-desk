@@ -1210,6 +1210,18 @@
     return row;
   }
 
+  function normalizeQrcodeImage(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    const s = raw.trim();
+    if (!s) return null;
+    // Already a data URL or http(s) URL
+    if (s.startsWith("data:") || s.startsWith("http://") || s.startsWith("https://")) {
+      return s;
+    }
+    // Likely raw base64 — prepend PNG data URL prefix
+    return `data:image/png;base64,${s}`;
+  }
+
   function startWechatQrcodeLogin() {
     if (view.wechatBotQrcodePending) return;
     view.wechatBotQrcodePending = true;
@@ -1223,7 +1235,7 @@
         ops.requestRender({ content: true });
         return;
       }
-      view.wechatBotQrcodeImage = result.qrcodeImg;
+      view.wechatBotQrcodeImage = normalizeQrcodeImage(result.qrcodeImg);
       view.wechatBotQrcodeKey = result.qrcode;
       ops.requestRender({ content: true });
       // Start polling for scan status
