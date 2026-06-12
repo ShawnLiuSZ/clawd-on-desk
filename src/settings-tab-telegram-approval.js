@@ -1131,7 +1131,8 @@
     row.appendChild(ctrl);
 
     // ── QR Code login section ──
-    if (!cfg.token) {
+    // Show when no token yet, or when user is in edit mode (wanting to re-login).
+    if (!cfg.token || view.wechatBotEditing) {
       const qrRow = document.createElement("div");
       qrRow.className = "row";
       qrRow.style.display = "flex";
@@ -1145,54 +1146,44 @@
       qrLabel.textContent = "Login with QR Code";
       const qrDesc = document.createElement("span");
       qrDesc.className = "row-desc";
-      qrDesc.textContent = view.wechatBotQrcodeImage
-        ? "Scan the QR code with WeChat to login."
-        : "Click the button below to generate a WeChat login QR code.";
+      if (cfg.token && view.wechatBotEditing) {
+        qrDesc.textContent = view.wechatBotQrcodeImage
+          ? "Scan to replace your current token."
+          : "Generate a new QR code to replace your current token.";
+      } else {
+        qrDesc.textContent = view.wechatBotQrcodeImage
+          ? "Scan the QR code with WeChat to login."
+          : "Click the button below to generate a WeChat login QR code.";
+      }
       qrText.appendChild(qrLabel);
       qrText.appendChild(qrDesc);
       qrRow.appendChild(qrText);
 
       if (view.wechatBotQrcodeImage) {
-        // Show the login URL as a clickable link — the user should open it
-        // in WeChat on their phone to complete login. The URL is a WeChat
-        // Mini Program path (liteapp.weixin.qq.com) that triggers login.
-        const linkContainer = document.createElement("div");
-        linkContainer.style.display = "flex";
-        linkContainer.style.flexDirection = "column";
-        linkContainer.style.alignItems = "center";
-        linkContainer.style.gap = "8px";
-        linkContainer.style.margin = "8px 0";
+        // Display the QR code image directly — user scans with WeChat on phone.
+        const qrImgRow = document.createElement("div");
+        qrImgRow.style.display = "flex";
+        qrImgRow.style.flexDirection = "column";
+        qrImgRow.style.alignItems = "center";
+        qrImgRow.style.gap = "8px";
+        qrImgRow.style.margin = "8px 0";
 
-        const loginUrl = view.wechatBotQrcodeUrl || view.wechatBotQrcodeImage;
-
-        const link = document.createElement("a");
-        link.href = loginUrl;
-        link.textContent = "Open WeChat Login Link";
-        link.className = "soft-btn accent";
-        link.style.textDecoration = "none";
-        link.style.cursor = "pointer";
-        link.addEventListener("click", (e) => {
-          e.preventDefault();
-          helpers.openExternalSafe(loginUrl);
-        });
-        linkContainer.appendChild(link);
+        const img = document.createElement("img");
+        img.src = view.wechatBotQrcodeImage;
+        img.alt = "WeChat Login QR Code";
+        img.style.width = "200px";
+        img.style.height = "200px";
+        img.style.borderRadius = "8px";
+        img.style.imageRendering = "pixelated";
+        qrImgRow.appendChild(img);
 
         const hint = document.createElement("span");
         hint.className = "row-desc";
-        hint.textContent = "Click the link above, then confirm login in WeChat on your phone.";
+        hint.textContent = "Scan the QR code with WeChat on your phone to login.";
         hint.style.textAlign = "center";
-        linkContainer.appendChild(hint);
+        qrImgRow.appendChild(hint);
 
-        // Also show the raw URL for reference
-        const urlText = document.createElement("div");
-        urlText.className = "row-desc";
-        urlText.style.fontSize = "11px";
-        urlText.style.wordBreak = "break-all";
-        urlText.style.opacity = "0.6";
-        urlText.textContent = loginUrl;
-        linkContainer.appendChild(urlText);
-
-        qrRow.appendChild(linkContainer);
+        qrRow.appendChild(qrImgRow);
       }
 
       if (view.wechatBotQrcodeError) {
