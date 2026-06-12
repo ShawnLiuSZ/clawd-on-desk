@@ -279,9 +279,10 @@ function createQQBotClient(config, options = {}) {
   // can see it). render_data.style: 0 grey, 1 blue. The callback payload we
   // need on click is encoded into action.data as "<permId>|<behavior>".
   function makeButton(id, label, permId, behavior, style) {
+    const text = String(label);
     return {
       id: String(id),
-      render_data: { label: String(label).slice(0, 36), visited_label: String(label).slice(0, 36), style: style || 0 },
+      render_data: { label: text, visited_label: text, style: style || 0 },
       action: {
         type: 1,
         permission: { type: 2 },
@@ -352,7 +353,8 @@ function createQQBotClient(config, options = {}) {
     return {
       // Clamp total content — QQ rejects over-long markdown bodies.
       markdown: { content: lines.join("\n").slice(0, 1800) },
-      keyboard: { content: { rows: chunkRows(buttons, 5) } },
+      // One button per row so long suggestion labels render in full (no truncation).
+      keyboard: { content: { rows: chunkRows(buttons, 1) } },
     };
   }
 

@@ -200,6 +200,33 @@ describe("qq-bot-client: buildApprovalCard", () => {
     assert.ok(buttons[2].action.data.startsWith("qq_perm1|suggestion:"));
   });
 
+  it("puts exactly one button per row", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const suggestions = [
+      { type: "addRules", behavior: "allow", toolName: "Bash" },
+      { type: "addRules", behavior: "deny", toolName: "Write" },
+      { type: "setMode", mode: "acceptEdits" },
+    ];
+    const card = client.buildApprovalCard("Bash", { command: "ls" }, "s1", "qq_p", suggestions, "AB");
+    const rows = card.keyboard.content.rows;
+    assert.ok(rows.length >= 5, "allow + deny + 3 suggestions = 5 rows");
+    assert.ok(rows.every((r) => r.buttons.length === 1), "each row has exactly one button");
+  });
+
+  it("does not truncate long button labels", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const longTool = "X".repeat(80);
+    const card = client.buildApprovalCard("Bash", { command: "ls" }, "s1", "qq_p", [
+      { type: "addRules", behavior: "allow", toolName: longTool },
+    ], "AB");
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    const sug = buttons.find((b) => b.action.data === "qq_p|suggestion:0");
+    assert.ok(sug, "suggestion button exists");
+    // "📋 Always <80 X's>" → 远超 36；旧实现会截到 36
+    assert.ok(sug.render_data.label.length > 36, "label is not clamped to 36 chars");
+    assert.ok(sug.render_data.label.includes(longTool), "full tool name preserved");
+  });
+
   it("handles missing tool input gracefully", () => {
     const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
     const card = client.buildApprovalCard(null, null, null, "qq_perm2", []);
