@@ -256,6 +256,14 @@ function startRemoteApproval(ctx, permEntry) {
   } catch (err) {
     ctx.permLog(`telegram remote approval start failed: ${err && err.message ? err.message : err}`);
   }
+  // Also start Lark remote approval if configured
+  if (typeof ctx.maybeStartRemoteLarkApproval === "function") {
+    try {
+      ctx.maybeStartRemoteLarkApproval(permEntry);
+    } catch (err) {
+      ctx.permLog(`lark remote approval start failed: ${err && err.message ? err.message : err}`);
+    }
+  }
 }
 
 function addPendingPermission(ctx, permEntry) {

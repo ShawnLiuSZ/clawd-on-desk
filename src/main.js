@@ -28,6 +28,10 @@ const {
   formatTelegramStatusDiagnostic,
 } = require("./telegram-approval-runtime-status");
 const { createTelegramMigrationController } = require("./telegram-migration-controller");
+const { createLarkBotClient } = require("./lark-bot-client");
+const { createLarkApprovalBridge } = require("./lark-approval");
+const { createLarkNotifier } = require("./lark-notify");
+const { normalizeLarkBot } = require("./lark-bot-settings");
 const { createTelegramSidecarStatusBridge } = require("./telegram-sidecar-status-bridge");
 const initUpdateBubble = require("./update-bubble");
 const { registerUpdateBubbleIpc } = initUpdateBubble;
@@ -1143,6 +1147,14 @@ const _permCtx = {
   clearShortcutFailure: (actionId) => shortcutRuntime.clearFailure(actionId),
   repositionUpdateBubble: () => repositionUpdateBubble(),
   getTelegramApprovalClient: () => getTelegramApprovalClient(),
+  getLarkApprovalBridge: () => getOrCreateLarkApprovalBridge(),
+  getLarkBotConfig: () => _settingsController ? _settingsController.get("larkBot") : null,
+  cancelLarkApproval: (permEntry) => {
+    const bridge = getOrCreateLarkApprovalBridge();
+    if (bridge && typeof bridge.cancelApproval === "function") {
+      try { bridge.cancelApproval(permEntry); } catch {}
+    }
+  },
   onPermissionsChanged: () => {
     if (hardwareBuddyAdapter) hardwareBuddyAdapter.notifyPermissionsChanged();
   },
@@ -1152,7 +1164,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteLarkApproval, cancelLarkApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -3530,4 +3542,79 @@ if (!gotTheLock) {
     if (!isQuitting) return;
     app.quit();
   });
+}
+
+// ── Lark Bot Integration ──
+let _larkBotClient = null;
+let _larkApprovalBridge = null;
+let _larkNotifier = null;
+
+function getOrCreateLarkBotClient() {
+  const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
+  if (!larkConfig || !larkConfig.enabled) {
+    _larkBotClient = null;
+    _larkNotifier = null;
+    return null;
+  }
+  const normalized = normalizeLarkBot(larkConfig);
+  if (_larkBotClient) {
+    _larkBotClient.updateConfig(normalized);
+    return _larkBotClient;
+  }
+  _larkBotClient = createLarkBotClient(normalized, { log: console.log, getLang: () => lang });
+  _larkNotifier = createLarkNotifier(_larkBotClient, { log: console.log, getLang: () => lang });
+  return _larkBotClient;
+}
+
+function getOrCreateLarkApprovalBridge() {
+  if (_larkApprovalBridge) return _larkApprovalBridge;
+  const client = getOrCreateLarkBotClient();
+  if (!client) return null;
+  _larkApprovalBridge = createLarkApprovalBridge(client, {
+    log: console.log,
+    getAuthorizedChatId: () => {
+      const c = _settingsController ? _settingsController.get("larkBot") : null;
+      return (c && c.chatId) || "";
+    },
+  });
+  try { _larkApprovalBridge.start(); } catch (err) {
+    console.log(`lark-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+  return _larkApprovalBridge;
+}
+
+function getOrCreateLarkNotifier() {
+  if (_larkNotifier) return _larkNotifier;
+  const client = getOrCreateLarkBotClient();
+  if (!client) return null;
+  _larkNotifier = createLarkNotifier(client, { log: console.log, getLang: () => lang });
+  return _larkNotifier;
+}
+
+async function testLarkBotConnection() {
+  const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
+  if (!larkConfig || !larkConfig.enabled) {
+    return { status: "error", message: "Lark Bot is not enabled" };
+  }
+  const normalized = normalizeLarkBot(larkConfig);
+  if (!normalized.appId || !normalized.appSecret) {
+    return { status: "error", message: "Lark Bot App ID or App Secret is not configured" };
+  }
+  if (!normalized.chatId) {
+    return { status: "error", message: "Lark Bot Chat ID is not configured" };
+  }
+  const client = createLarkBotClient(normalized, { log: console.log, getLang: () => lang });
+  try {
+    const token = await client.getToken();
+    if (!token) {
+      return { status: "error", message: "Failed to get Lark access token" };
+    }
+    const result = await client.sendTextMessage("Clawd Lark Bot connection test");
+    if (result) {
+      return { status: "ok", message: "Lark Bot connection successful" };
+    }
+    return { status: "error", message: "Failed to send test message" };
+  } catch (err) {
+    return { status: "error", message: `Lark Bot connection failed: ${err && err.message ? err.message : String(err)}` };
+  }
 }

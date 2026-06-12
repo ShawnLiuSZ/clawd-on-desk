@@ -1011,6 +1011,10 @@ function cancelRemoteApproval(permEntry) {
   if (!controller) return;
   permEntry.remoteApprovalAbortController = null;
   try { controller.abort(); } catch {}
+  // Also cancel Lark approval if exists
+  if (typeof ctx.cancelLarkApproval === "function") {
+    try { ctx.cancelLarkApproval(permEntry); } catch {}
+  }
 }
 
 // "Go to terminal" path: drop the bubble, abort any in-flight Telegram prompt,
@@ -1101,6 +1105,47 @@ function maybeStartRemoteApproval(permEntry) {
         permEntry.remoteApprovalAbortController = null;
       }
     });
+  return true;
+}
+
+function getLarkApprovalBridge() {
+  if (typeof ctx.getLarkApprovalBridge === "function") {
+    try { return ctx.getLarkApprovalBridge(); } catch (err) {
+      permLog(`lark approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.larkApprovalBridge || null;
+}
+
+function cancelLarkApproval(permEntry) {
+  const bridge = getLarkApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
+function maybeStartRemoteLarkApproval(permEntry) {
+  if (!isRemoteApprovalActionable(permEntry)) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const bridge = getLarkApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const larkConfig = (ctx.getLarkBotConfig && typeof ctx.getLarkBotConfig === "function")
+    ? ctx.getLarkBotConfig()
+    : (ctx.larkBotConfig || null);
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    resolvePermissionEntry(entry, behavior);
+  };
+  try {
+    bridge.requestApproval(permEntry, resolveFn, larkConfig);
+  } catch (err) {
+    permLog(`lark remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
   return true;
 }
 
@@ -1885,6 +1930,8 @@ return {
   pendingPermissions, PASSTHROUGH_TOOLS,
   addPendingPermission, removePendingPermission,
   maybeStartRemoteApproval,
+  maybeStartRemoteLarkApproval,
+  cancelLarkApproval,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,
