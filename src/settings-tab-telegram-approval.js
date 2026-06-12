@@ -26,6 +26,12 @@
     wechatBotTestSeq: 0,
     wechatBotDraft: null,
     wechatBotDirty: false,
+    wechatBotEditing: false,
+    wechatBotQrcodePending: false,
+    wechatBotQrcodeImage: null,
+    wechatBotQrcodeKey: null,
+    wechatBotQrcodePollTimer: null,
+    wechatBotQrcodeError: null,
   };
 
   function t(key) {
@@ -975,7 +981,7 @@
       id: "remote-approval.wechat-bot",
       headerContent: buildWechatBotChannelHeader(statusKind),
       defaultCollapsed: false,
-      className: "remote-approval-channel-card",
+      className: "remote-approval-channel-card tg-approval-channel-card",
       children: [
         buildWechatBotStatusRow(cfg, statusKind),
         helpers.buildSection(t("wechatBotToken"), [buildWechatBotTokenRow(cfg)]),
@@ -985,145 +991,394 @@
   }
 
   function buildWechatBotChannelHeader(kind) {
-    const container = document.createElement("div");
-    container.style.display = "flex";
-    container.style.alignItems = "center";
-    container.style.justifyContent = "space-between";
-    container.style.flex = "1";
-    container.style.gap = "8px";
+    const wrap = document.createElement("div");
+    wrap.className = "tg-approval-channel-header";
 
     const nameEl = document.createElement("span");
-    nameEl.className = "settings-label";
+    nameEl.className = "tg-approval-channel-name";
     nameEl.textContent = t("wechatBot");
-    container.appendChild(nameEl);
+    wrap.appendChild(nameEl);
 
     const badge = document.createElement("span");
-    badge.className = "settings-badge";
-    if (kind === "ready") {
-      badge.style.backgroundColor = "var(--color-background-success)";
-      badge.style.color = "var(--color-text-success)";
-      badge.textContent = t("wechatBotConnected");
-    } else {
-      badge.style.backgroundColor = "var(--color-background-warning)";
-      badge.style.color = "var(--color-text-warning)";
-      badge.textContent = t("wechatBotDisconnected");
-    }
-    container.appendChild(badge);
+    badge.className = "tg-approval-channel-badge " + statusBadgeClass(kind);
+    const dot = document.createElement("span");
+    dot.className = "tg-approval-channel-badge-dot";
+    badge.appendChild(dot);
+    const badgeText = document.createElement("span");
+    badgeText.textContent = t("telegramApprovalCardKind_" + kind);
+    badge.appendChild(badgeText);
+    wrap.appendChild(badge);
 
-    return container;
+    return wrap;
   }
 
   function buildWechatBotStatusRow(cfg, kind) {
     const row = document.createElement("div");
-    row.className = "settings-row";
-
-    const desc = document.createElement("span");
-    desc.className = "settings-description";
-    desc.style.padding = "8px 0";
-    desc.textContent = kind === "ready"
-      ? t("wechatBotDescription")
-      : t("wechatBotConfigIncomplete");
-    row.appendChild(desc);
-
+    row.className = "tg-approval-channel-status-row " + statusBadgeClass(kind);
+    const text = document.createElement("span");
+    text.className = "tg-approval-channel-status-text";
+    if (!cfg.token) {
+      text.textContent = "Not configured — login via QR code or paste your Bearer token below.";
+    } else {
+      text.textContent = "Token configured. Ready to receive approval requests.";
+    }
+    row.appendChild(text);
     return row;
   }
 
   function buildWechatBotTokenRow(cfg) {
-    const row = document.createElement("div");
-    row.className = "settings-row";
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.gap = "8px";
+    if (cfg.token && !view.wechatBotEditing) {
+      return buildWechatBotTokenStoredRow();
+    }
+    return buildWechatBotTokenEditRow(cfg);
+  }
 
+  function buildWechatBotTokenStoredRow() {
+    const row = document.createElement("div");
+    row.className = "row tg-approval-token-stored-row";
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label tg-approval-token-stored-label";
+    label.textContent = "Token is configured";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = "Your ilink Bearer token is stored locally. Click Replace to update it.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "soft-btn";
+    btn.textContent = "Replace Token";
+    btn.addEventListener("click", () => {
+      view.wechatBotEditing = true;
+      ops.requestRender({ content: true });
+    });
+    ctrl.appendChild(btn);
+    row.appendChild(ctrl);
+    return row;
+  }
+
+  function buildWechatBotTokenEditRow(cfg) {
+    const row = document.createElement("div");
+    row.className = "row tg-approval-recipient-row";
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = t("wechatBotToken");
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = cfg.token
+      ? "Enter a new token to replace the current one."
+      : "Paste your ilink Bearer token, or login via QR code below.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control tg-approval-input-row";
     const input = document.createElement("input");
     input.type = "password";
-    input.className = "settings-input";
-    input.placeholder = "ilink Bearer Token";
-    input.value = cfg.token ? "********" : "";
-    input.style.flex = "1";
-    input.addEventListener("change", () => {
-      if (input.value && input.value !== "********") {
-        view.wechatBotDraft = { value: input.value };
-        view.wechatBotDirty = true;
-        saveWechatBotToken(input.value);
-      }
-    });
-    input.addEventListener("focus", () => {
-      if (input.value === "********") {
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = cfg.token ? "Leave blank to keep current" : "Paste ilink Bearer token";
+    input.className = "tg-approval-input";
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        const val = String(input.value || "").trim();
+        if (!val) return;
+        saveWechatBotToken(val);
         input.value = "";
+        view.wechatBotEditing = false;
+        ops.requestRender({ content: true });
       }
     });
-    row.appendChild(input);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "soft-btn accent";
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", () => {
+      const val = String(input.value || "").trim();
+      if (!val) return;
+      saveWechatBotToken(val);
+      input.value = "";
+      view.wechatBotEditing = false;
+      ops.requestRender({ content: true });
+    });
+    ctrl.appendChild(input);
+    ctrl.appendChild(saveBtn);
+
+    if (cfg.token) {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "soft-btn";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => {
+        view.wechatBotEditing = false;
+        ops.requestRender({ content: true });
+      });
+      ctrl.appendChild(cancelBtn);
+    }
+    row.appendChild(ctrl);
+
+    // ── QR Code login section ──
+    if (!cfg.token) {
+      const qrRow = document.createElement("div");
+      qrRow.className = "row";
+      qrRow.style.display = "flex";
+      qrRow.style.flexDirection = "column";
+      qrRow.style.paddingLeft = "0";
+
+      const qrText = document.createElement("div");
+      qrText.className = "row-text";
+      const qrLabel = document.createElement("span");
+      qrLabel.className = "row-label";
+      qrLabel.textContent = "Login with QR Code";
+      const qrDesc = document.createElement("span");
+      qrDesc.className = "row-desc";
+      qrDesc.textContent = view.wechatBotQrcodeImage
+        ? "Scan the QR code with WeChat to login."
+        : "Click the button below to generate a WeChat login QR code.";
+      qrText.appendChild(qrLabel);
+      qrText.appendChild(qrDesc);
+      qrRow.appendChild(qrText);
+
+      if (view.wechatBotQrcodeImage) {
+        const img = document.createElement("img");
+        img.src = view.wechatBotQrcodeImage;
+        img.alt = "WeChat login QR code";
+        img.style.width = "180px";
+        img.style.height = "180px";
+        img.style.margin = "8px 0";
+        img.style.borderRadius = "8px";
+        img.style.alignSelf = "center";
+        qrRow.appendChild(img);
+
+        const hint = document.createElement("span");
+        hint.className = "row-desc";
+        hint.textContent = "Open WeChat on your phone, scan QR code, and tap Login.";
+        hint.style.textAlign = "center";
+        qrRow.appendChild(hint);
+      }
+
+      if (view.wechatBotQrcodeError) {
+        const errEl = document.createElement("span");
+        errEl.className = "form-error";
+        errEl.textContent = view.wechatBotQrcodeError;
+        qrRow.appendChild(errEl);
+      }
+
+      row.appendChild(qrRow);
+
+      const btnRow = document.createElement("div");
+      btnRow.style.display = "flex";
+      btnRow.style.gap = "8px";
+      btnRow.style.marginTop = "8px";
+
+      const qrBtn = document.createElement("button");
+      qrBtn.type = "button";
+      qrBtn.className = "soft-btn accent";
+      qrBtn.textContent = view.wechatBotQrcodePending ? "Generating QR code…" : "Get QR Code";
+      qrBtn.disabled = view.wechatBotQrcodePending;
+      qrBtn.addEventListener("click", () => {
+        startWechatQrcodeLogin();
+      });
+      btnRow.appendChild(qrBtn);
+
+      if (view.wechatBotQrcodeImage) {
+        const cancelQrBtn = document.createElement("button");
+        cancelQrBtn.type = "button";
+        cancelQrBtn.className = "soft-btn";
+        cancelQrBtn.textContent = "Cancel QR Login";
+        cancelQrBtn.addEventListener("click", () => {
+          cancelWechatQrcodeLogin();
+        });
+        btnRow.appendChild(cancelQrBtn);
+      }
+
+      row.appendChild(btnRow);
+    }
 
     return row;
+  }
+
+  function startWechatQrcodeLogin() {
+    if (view.wechatBotQrcodePending) return;
+    view.wechatBotQrcodePending = true;
+    view.wechatBotQrcodeError = null;
+    ops.requestRender({ content: true });
+
+    callCommand("wechatBot.getQrcode").then((result) => {
+      view.wechatBotQrcodePending = false;
+      if (!result || result.status !== "ok" || !result.qrcode) {
+        view.wechatBotQrcodeError = (result && result.message) || "Failed to get QR code";
+        ops.requestRender({ content: true });
+        return;
+      }
+      view.wechatBotQrcodeImage = result.qrcodeImg;
+      view.wechatBotQrcodeKey = result.qrcode;
+      ops.requestRender({ content: true });
+      // Start polling for scan status
+      pollWechatQrcodeStatus();
+    }).catch((err) => {
+      view.wechatBotQrcodePending = false;
+      view.wechatBotQrcodeError = err && err.message ? err.message : "Failed to get QR code";
+      ops.requestRender({ content: true });
+    });
+  }
+
+  function pollWechatQrcodeStatus() {
+    if (!view.wechatBotQrcodeKey) return;
+
+    callCommand("wechatBot.pollQrcodeStatus", { qrcode: view.wechatBotQrcodeKey }).then((result) => {
+      if (!result || !view.wechatBotQrcodeKey) return;
+
+      if (result.status === "ok" && result.botToken) {
+        // Login success!
+        saveWechatBotToken(result.botToken);
+        cancelWechatQrcodeLogin();
+        view.wechatBotEditing = false;
+        ops.requestRender({ content: true });
+        ops.showToast("WeChat login successful!");
+        return;
+      }
+
+      if (result.status === "pending") {
+        // Still waiting - poll again after 1.5s
+        view.wechatBotQrcodePollTimer = setTimeout(() => {
+          pollWechatQrcodeStatus();
+        }, 1500);
+      } else if (result.status === "error") {
+        view.wechatBotQrcodeError = result.message || "QR code expired or login failed";
+        view.wechatBotQrcodeImage = null;
+        view.wechatBotQrcodeKey = null;
+        ops.requestRender({ content: true });
+      } else if (result.status === "timeout") {
+        view.wechatBotQrcodeError = "QR code expired. Please generate a new one.";
+        view.wechatBotQrcodeImage = null;
+        view.wechatBotQrcodeKey = null;
+        ops.requestRender({ content: true });
+      }
+    }).catch(() => {
+      // Retry on network error
+      view.wechatBotQrcodePollTimer = setTimeout(() => {
+        pollWechatQrcodeStatus();
+      }, 2000);
+    });
+  }
+
+  function cancelWechatQrcodeLogin() {
+    if (view.wechatBotQrcodePollTimer) {
+      clearTimeout(view.wechatBotQrcodePollTimer);
+      view.wechatBotQrcodePollTimer = null;
+    }
+    view.wechatBotQrcodeImage = null;
+    view.wechatBotQrcodeKey = null;
+    view.wechatBotQrcodeError = null;
+    ops.requestRender({ content: true });
   }
 
   function buildWechatBotEnabledRow(cfg) {
     const row = document.createElement("div");
-    row.className = "settings-row";
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.justifyContent = "space-between";
+    row.className = "row";
 
+    const text = document.createElement("div");
+    text.className = "row-text";
     const label = document.createElement("span");
-    label.className = "settings-label";
-    label.textContent = t("wechatBotApprovalEnabled");
+    label.className = "row-label";
+    label.textContent = "Enabled";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = t("wechatBotApprovalEnabledDescription");
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
 
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.className = "settings-toggle";
-    toggle.checked = cfg.approvalEnabled;
-    toggle.addEventListener("change", () => {
-      saveWechatBotField("approvalEnabled", toggle.checked);
-    });
-
-    row.appendChild(label);
-    row.appendChild(toggle);
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control";
+    const sw = document.createElement("div");
+    sw.className = "switch";
+    sw.setAttribute("role", "switch");
+    sw.setAttribute("tabindex", "0");
+    helpers.setSwitchVisual(sw, cfg.enabled);
+    const ready = wechatBotStatusKind(cfg) === "ready";
+    if (!ready) {
+      sw.classList.add("disabled");
+      sw.setAttribute("aria-disabled", "true");
+      sw.removeAttribute("tabindex");
+    } else {
+      const toggle = () => {
+        saveWechatBotField("enabled", !cfg.enabled);
+      };
+      sw.addEventListener("click", toggle);
+      sw.addEventListener("keydown", (ev) => {
+        if (ev.key === " " || ev.key === "Enter") {
+          ev.preventDefault();
+          toggle();
+        }
+      });
+    }
+    ctrl.appendChild(sw);
+    row.appendChild(ctrl);
     return row;
   }
 
   function buildWechatBotTestRow(cfg) {
-    const row = document.createElement("div");
-    row.className = "settings-row";
-    row.style.display = "flex";
-    row.style.flexDirection = "column";
-    row.style.gap = "4px";
-
     const ready = wechatBotStatusKind(cfg) === "ready";
     const testDisabled = view.wechatBotTestPending || !ready || !cfg.enabled;
+    const row = document.createElement("div");
+    row.className = "row";
+    if (!ready || !cfg.enabled) row.classList.add("tg-approval-row-disabled");
 
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = t("wechatBotTestConnection");
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = "Verify that the WeChat Bot can connect to the ilink gateway.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control";
     const btn = document.createElement("button");
-    btn.className = "settings-button";
-    btn.style.alignSelf = "flex-start";
+    btn.type = "button";
+    btn.className = "soft-btn accent";
     btn.textContent = view.wechatBotTestPending ? "Testing…" : t("wechatBotTestConnection");
     btn.disabled = testDisabled;
-    btn.style.opacity = testDisabled ? "0.5" : "1";
-    btn.style.cursor = testDisabled ? "not-allowed" : "pointer";
     btn.addEventListener("click", () => {
+      if (testDisabled) return;
       view.wechatBotTestPending = true;
       view.wechatBotTestResult = null;
-      view.wechatBotTestSeq = Date.now();
+      ops.requestRender({ content: true });
       callCommand("wechatBot.test").then((result) => {
         view.wechatBotTestPending = false;
         view.wechatBotTestResult = result;
+        ops.requestRender({ content: true });
         if (result && result.status === "ok") {
           ops.showToast(t("wechatBotTestSuccess"));
         } else {
           ops.showToast((result && result.message) || t("wechatBotTestFailed"), { error: true });
         }
-        ops.requestRender({ content: true });
-      }).catch((err) => {
-        view.wechatBotTestPending = false;
-        view.wechatBotTestResult = { status: "error", message: err && err.message };
-        ops.showToast(t("wechatBotTestFailed"), { error: true });
-        ops.requestRender({ content: true });
       });
     });
-    row.appendChild(btn);
+    ctrl.appendChild(btn);
+    row.appendChild(ctrl);
 
     if (view.wechatBotTestResult && view.wechatBotTestResult.status !== "ok") {
-      const errEl = document.createElement("span");
-      errEl.className = "settings-error";
+      const errEl = document.createElement("div");
+      errEl.className = "form-error";
       errEl.textContent = view.wechatBotTestResult.message || "Unknown error";
       row.appendChild(errEl);
     }

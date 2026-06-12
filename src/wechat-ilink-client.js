@@ -98,6 +98,39 @@ function httpGetJson(url, options = {}) {
   return httpRequest("GET", url, null, options);
 }
 
+async function fetchQrcode(baseUrl = DEFAULT_BASE_URL) {
+  const url = `${baseUrl}/ilink/bot/get_bot_qrcode?bot_type=3`;
+  const result = await httpGetJson(url, { timeout: 15000 });
+  if (result.status !== 200) {
+    throw new Error(`get_bot_qrcode failed: status=${result.status}`);
+  }
+  const body = result.body;
+  if (body && body.qrcode_img_content && body.qrcode) {
+    return {
+      qrcodeImg: body.qrcode_img_content,
+      qrcode: body.qrcode,
+    };
+  }
+  throw new Error("get_bot_qrcode returned unexpected response");
+}
+
+async function pollQrcodeStatus(qrcodeKey, baseUrl = DEFAULT_BASE_URL) {
+  const url = `${baseUrl}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcodeKey)}`;
+  const result = await httpGetJson(url, { timeout: 35000 });
+  if (result.status !== 200) {
+    return { status: "pending" };
+  }
+  const body = result.body;
+  if (body && body.bot_token) {
+    return {
+      status: "ok",
+      botToken: body.bot_token,
+      baseUrl: body.baseurl || baseUrl,
+    };
+  }
+  return { status: "pending" };
+}
+
 function createWechatIlinkClient(config, options = {}) {
   const nowFn = typeof options.now === "function" ? options.now : () => Date.now();
   const logFn = typeof options.log === "function" ? options.log : () => {};
@@ -403,4 +436,6 @@ module.exports = {
   generateWechatUin,
   generateClientId,
   createWechatIlinkClient,
+  fetchQrcode,
+  pollQrcodeStatus,
 };

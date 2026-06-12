@@ -1142,6 +1142,31 @@ async function wechatBotTest(_payload, deps = {}) {
   return result || { status: "error", message: "WeChat Bot test returned no result" };
 }
 
+async function wechatBotGetQrcode(_payload, deps = {}) {
+  if (!deps || typeof deps.getWechatQrcode !== "function") {
+    return { status: "error", message: "wechatBot.getQrcode requires getWechatQrcode dep" };
+  }
+  try {
+    return await deps.getWechatQrcode();
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "Failed to get QR code" };
+  }
+}
+
+async function wechatBotPollQrcodeStatus(payload, deps = {}) {
+  if (!payload || !payload.qrcode) {
+    return { status: "error", message: "qrcode key is required" };
+  }
+  if (!deps || typeof deps.pollWechatQrcodeStatus !== "function") {
+    return { status: "error", message: "wechatBot.pollQrcodeStatus requires pollWechatQrcodeStatus dep" };
+  }
+  try {
+    return await deps.pollWechatQrcodeStatus(payload.qrcode);
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "Failed to poll QR code status" };
+  }
+}
+
 function cleanupMessage(result) {
   const summary = result && result.summary;
   if (!summary) return "Integration cleanup finished";
@@ -1335,6 +1360,8 @@ const commandRegistry = {
   "telegramApproval.tokenInfo": telegramApprovalTokenInfo,
   "telegramApproval.test": telegramApprovalSendTest,
   "wechatBot.test": wechatBotTest,
+  "wechatBot.getQrcode": wechatBotGetQrcode,
+  "wechatBot.pollQrcodeStatus": wechatBotPollQrcodeStatus,
   "telegramMigration.snapshot": telegramMigrationSnapshot,
   "telegramMigration.dispatch": telegramMigrationDispatch,
 };

@@ -289,6 +289,8 @@ const _settingsController = createSettingsController({
     sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     deleteTelegramApprovalTokenFile: () => deleteTelegramApprovalTokenFile(),
     testWechatBotConnection: () => testWechatBotConnection(),
+    getWechatQrcode: () => getWechatQrcode(),
+    pollWechatQrcodeStatus: (key) => pollWechatQrcodeStatus(key),
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1164,6 +1166,30 @@ async function testWechatBotConnection() {
     return { status: "ok", message: "WeChat Bot is connected and polling for messages." };
   }
   return { status: "ok", message: "WeChat Bot is configured. Long-polling will connect on next message cycle." };
+}
+
+async function getWechatQrcode() {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  const config = normalizeWechatBot(wxConfig || {});
+  try {
+    const { fetchQrcode } = require("./wechat-ilink-client");
+    const result = await fetchQrcode(config.baseUrl);
+    return { status: "ok", qrcodeImg: result.qrcodeImg, qrcode: result.qrcode };
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "Failed to get QR code" };
+  }
+}
+
+async function pollWechatQrcodeStatus(qrcodeKey) {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  const config = normalizeWechatBot(wxConfig || {});
+  try {
+    const { pollQrcodeStatus: doPoll } = require("./wechat-ilink-client");
+    const result = await doPoll(qrcodeKey, config.baseUrl);
+    return result;
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "QR code polling failed" };
+  }
 }
 
 const _permCtx = {
