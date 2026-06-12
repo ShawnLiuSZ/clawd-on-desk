@@ -1138,7 +1138,7 @@ function getOrCreateQQBotClient() {
     _qqBotClient.updateConfig(normalized);
     return _qqBotClient;
   }
-  _qqBotClient = createQQBotClient(normalized, { log: console.log, WebSocket });
+  _qqBotClient = createQQBotClient(normalized, { log: console.log, WebSocket, getLang: () => lang });
   if (!_qqBotOpenidListenerInstalled && typeof _qqBotClient.onOpenidDiscovered === "function") {
     _qqBotClient.onOpenidDiscovered((openid) => persistQQBotOpenidToSettings(openid));
     _qqBotOpenidListenerInstalled = true;
@@ -1254,7 +1254,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, maybeStartRemoteQQElicitation, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -1678,6 +1678,7 @@ const _serverCtx = {
   showPermissionBubble,
   maybeStartRemoteApproval,
   maybeStartRemoteQQApproval,
+  maybeStartRemoteQQElicitation,
   replyOpencodePermission,
   permLog,
 };
