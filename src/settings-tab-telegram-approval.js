@@ -1210,15 +1210,19 @@
     return row;
   }
 
-  function normalizeQrcodeImage(raw) {
+  function normalizeQrcodeImage(raw, qrcode) {
+    // Prefer generating a reliable QR image from the qrcode key via qrserver API.
+    // The ilink API's qrcode_img_content field format is unreliable (raw bytes,
+    // base64 without prefix, empty string, etc.)
+    if (qrcode && typeof qrcode === "string") {
+      return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrcode)}`;
+    }
     if (!raw || typeof raw !== "string") return null;
     const s = raw.trim();
     if (!s) return null;
-    // Already a data URL or http(s) URL
     if (s.startsWith("data:") || s.startsWith("http://") || s.startsWith("https://")) {
       return s;
     }
-    // Likely raw base64 — prepend PNG data URL prefix
     return `data:image/png;base64,${s}`;
   }
 
@@ -1235,7 +1239,7 @@
         ops.requestRender({ content: true });
         return;
       }
-      view.wechatBotQrcodeImage = normalizeQrcodeImage(result.qrcodeImg);
+      view.wechatBotQrcodeImage = normalizeQrcodeImage(result.qrcodeImg, result.qrcode);
       view.wechatBotQrcodeKey = result.qrcode;
       ops.requestRender({ content: true });
       // Start polling for scan status
