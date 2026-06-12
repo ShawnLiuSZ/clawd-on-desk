@@ -106,17 +106,26 @@ async function fetchQrcode(baseUrl = DEFAULT_BASE_URL) {
     throw new Error("get_bot_qrcode returned unexpected response: missing qrcode key");
   }
   const qrcode = body.qrcode;
-  // qrcode_img_content can be: base64 string, data URL, URL, or empty
-  let qrcodeImg = (body.qrcode_img_content && typeof body.qrcode_img_content === "string")
-    ? body.qrcode_img_content.trim()
-    : "";
-  if (!qrcodeImg && body.url && typeof body.url === "string") {
-    qrcodeImg = body.url.trim();
+
+  // Generate a reliable QR image locally using the qrcode npm package.
+  // The ilink API's qrcode_img_content format is unreliable, so we always
+  // generate our own from the qrcode key.
+  let qrcodeImg = "";
+  try {
+    const QRCode = require("qrcode");
+    qrcodeImg = await QRCode.toDataURL(qrcode, { width: 200, margin: 2, errorCorrectionLevel: "M" });
+  } catch (err) {
+    // Fallback: use the API response field if local generation fails
+    qrcodeImg = (body.qrcode_img_content && typeof body.qrcode_img_content === "string")
+      ? body.qrcode_img_content.trim() : "";
+    if (!qrcodeImg && body.url && typeof body.url === "string") {
+      qrcodeImg = body.url.trim();
+    }
+    if (!qrcodeImg) {
+      qrcodeImg = `${baseUrl}/ilink/bot/qrcode?qrcode=${encodeURIComponent(qrcode)}`;
+    }
   }
-  // If still empty, construct a fallback URL from the qrcode key
-  if (!qrcodeImg) {
-    qrcodeImg = `${baseUrl}/ilink/bot/qrcode?qrcode=${encodeURIComponent(qrcode)}`;
-  }
+
   return { qrcodeImg, qrcode };
 }
 
