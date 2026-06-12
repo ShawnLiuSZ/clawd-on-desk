@@ -102,13 +102,22 @@ async function fetchQrcode(baseUrl = DEFAULT_BASE_URL) {
     throw new Error(`get_bot_qrcode failed: status=${result.status}`);
   }
   const body = result.body;
-  if (body && body.qrcode_img_content && body.qrcode) {
-    return {
-      qrcodeImg: body.qrcode_img_content,
-      qrcode: body.qrcode,
-    };
+  if (!body || !body.qrcode) {
+    throw new Error("get_bot_qrcode returned unexpected response: missing qrcode key");
   }
-  throw new Error("get_bot_qrcode returned unexpected response");
+  const qrcode = body.qrcode;
+  // qrcode_img_content can be: base64 string, data URL, URL, or empty
+  let qrcodeImg = (body.qrcode_img_content && typeof body.qrcode_img_content === "string")
+    ? body.qrcode_img_content.trim()
+    : "";
+  if (!qrcodeImg && body.url && typeof body.url === "string") {
+    qrcodeImg = body.url.trim();
+  }
+  // If still empty, construct a fallback URL from the qrcode key
+  if (!qrcodeImg) {
+    qrcodeImg = `${baseUrl}/ilink/bot/qrcode?qrcode=${encodeURIComponent(qrcode)}`;
+  }
+  return { qrcodeImg, qrcode };
 }
 
 async function pollQrcodeStatus(qrcodeKey, baseUrl = DEFAULT_BASE_URL) {
