@@ -25,8 +25,7 @@ const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 function compactLog(text, maxLen = 200) {
   let t = String(text == null ? "" : text);
   t = t.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
-  t = t.replace(/\b[A-Za-z0-9._~+/=-]{20,}\b/g, "<redacted>");
-  if (t.length > maxLen) t = `${t.slice(0, Math.max(0, maxLen - 1))}…`;
+  if (t.length > maxLen) t = `${t.slice(0, maxLen - 1)}…`;
   return t;
 }
 
