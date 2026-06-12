@@ -317,6 +317,18 @@ describe("qq-bot-client: buildConfirmationCard", () => {
     const card = client.buildConfirmationCard("Bash", "deny", "p1");
     assert.ok(card.markdown.content.includes("Denied"));
   });
+
+  it("includes the short code so the user can match the reply to a request", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const card = client.buildConfirmationCard("Bash", "allow", "EC8A");
+    assert.ok(card.markdown.content.includes("EC8A"), "confirmation echoes the request short code");
+  });
+
+  it("omits the code line when no short code is given", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const card = client.buildConfirmationCard("Bash", "allow", "");
+    assert.ok(!/\[\s*\]/.test(card.markdown.content), "no empty bracket when code is absent");
+  });
 });
 
 describe("qq-bot-client: buildElicitationCard", () => {

@@ -374,13 +374,16 @@ function createQQBotClient(config, options = {}) {
     return "";
   }
 
-  // Confirmation has no buttons — markdown-only body (still msg_type 2).
-  function buildConfirmationCard(toolName, decision, permId) {
+  // Confirmation has no buttons — markdown-only body (still msg_type 2). The
+  // short code is echoed (e.g. "[EC8A]") so the user can match this reply to the
+  // originating request when several are outstanding at once.
+  function buildConfirmationCard(toolName, decision, shortCode) {
     const emoji = decision === "allow" ? "✅" : "❌";
     const label = decision === "allow" ? "Allowed" : "Denied";
+    const tag = shortCode ? ` [${mdSafe(shortCode)}]` : "";
     return {
       markdown: {
-        content: `${emoji} **${label}**\n**Tool**: ${mdCode(toolName || "unknown")}\n**Decision**: ${label} via QQ`,
+        content: `${emoji} **${label}**${tag}\n**Tool**: ${mdCode(toolName || "unknown")}\n**Decision**: ${label} via QQ`,
       },
     };
   }

@@ -96,6 +96,22 @@ describe("qq-approval: createQQApprovalBridge", () => {
     assert.strictEqual(sendCalls, 1);
   });
 
+  it("confirmation message includes the request short code", () => {
+    let confirmCode = null;
+    const client = makeMockQQBotClient({
+      buildConfirmationCard: (toolName, decision, shortCode) => {
+        confirmCode = shortCode;
+        return { markdown: { content: "" } };
+      },
+    });
+    const bridge = createBridge(client);
+    bridge.requestApproval(makePermEntry(), () => {}, {});
+    const code = bridge._testGetFirstEntry().shortCode;
+    bridge._testHandleInteraction({ permId: bridge._testGetFirstPermId(), behavior: "allow" });
+    assert.ok(code && code.length > 0, "entry has a short code");
+    assert.strictEqual(confirmCode, code, "confirmation got the same short code");
+  });
+
   it("handleInteraction resolves the permEntry", () => {
     let resolvedEntry = null;
     let resolvedBehavior = null;

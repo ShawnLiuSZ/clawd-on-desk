@@ -77,7 +77,7 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     const resolveFn = entry.resolveFn;
     if (!permEntry || !resolveFn) return null;
     const normalized = normalizeBehavior(behavior);
-    sendConfirmation(permEntry, normalized);
+    sendConfirmation(permEntry, normalized, entry.shortCode);
     resolveFn(permEntry, normalized);
     return entry;
   }
@@ -256,7 +256,7 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     const resolveFn = entry.resolveFn;
     if (!permEntry || !resolveFn) return;
 
-    sendConfirmation(permEntry, "allow");
+    sendConfirmation(permEntry, "allow", entry.shortCode);
     resolveFn(permEntry, answers);
   }
 
@@ -388,12 +388,12 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     ].filter(Boolean).join("\n");
   }
 
-  function sendConfirmation(permEntry, behavior) {
+  function sendConfirmation(permEntry, behavior, shortCode) {
     if (!qqBotClient || typeof qqBotClient.sendCardMessage !== "function") return;
     const card = qqBotClient.buildConfirmationCard(
       permEntry.toolName,
       behavior === "allow" ? "allow" : "deny",
-      ""
+      shortCode || ""
     );
     qqBotClient.sendCardMessage(card).catch(() => {});
   }
