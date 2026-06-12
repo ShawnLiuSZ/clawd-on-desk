@@ -128,6 +128,9 @@ const {
 } = require("./telegram-approval-settings");
 const { EVENTS: TELEGRAM_MIGRATION_EVENTS } = require("./telegram-migration-state");
 const {
+  validateLarkBot,
+} = require("./lark-bot-settings");
+const {
   validateHardwareBuddySettings,
 } = require("./hardware-buddy-settings");
 
@@ -435,6 +438,9 @@ const updateRegistry = {
   },
   tgApproval(value) {
     return validateTelegramApproval(value);
+  },
+  larkBot(value) {
+    return validateLarkBot(value);
   },
 
   // v0.9.0 spike: persisted migration state across restarts. Shape:
@@ -1130,6 +1136,14 @@ async function telegramApprovalSendTest(_payload, deps = {}) {
   return result || { status: "error", message: "Telegram approval test returned no result" };
 }
 
+async function larkBotTest(_payload, deps = {}) {
+  if (!deps || typeof deps.testLarkBotConnection !== "function") {
+    return { status: "error", message: "larkBot.test requires testLarkBotConnection dep" };
+  }
+  const result = await deps.testLarkBotConnection();
+  return result || { status: "error", message: "Lark Bot test returned no result" };
+}
+
 function cleanupMessage(result) {
   const summary = result && result.summary;
   if (!summary) return "Integration cleanup finished";
@@ -1324,6 +1338,7 @@ const commandRegistry = {
   "telegramApproval.test": telegramApprovalSendTest,
   "telegramMigration.snapshot": telegramMigrationSnapshot,
   "telegramMigration.dispatch": telegramMigrationDispatch,
+  "larkBot.test": larkBotTest,
 };
 
 module.exports = {
