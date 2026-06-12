@@ -250,6 +250,31 @@ describe("qq-bot-client: buildApprovalCard", () => {
       assert.ok(row.buttons.length <= 5);
     }
   });
+
+  it("labels addRules suggestions without a label field", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const suggestions = [
+      { type: "addRules", behavior: "allow", toolName: "Bash" },
+      { type: "addRules", behavior: "deny", toolName: "Write" },
+      { type: "setMode", mode: "acceptEdits" },
+    ];
+    const card = client.buildApprovalCard("Bash", {}, "s1", "qq_p", suggestions);
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    const labels = buttons.map((b) => b.render_data && b.render_data.label).filter(Boolean);
+    // Should generate "Always Bash" / "Always deny Write" / "Auto edits"
+    assert.ok(labels.some((l) => l.includes("Always Bash")));
+    assert.ok(labels.some((l) => l.includes("Always deny Write")));
+    assert.ok(labels.some((l) => l.includes("Auto edits")));
+  });
+
+  it("falls back to 'Suggestion N' for unrecognized suggestion shapes", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const suggestions = [{ type: "unknown", foo: "bar" }];
+    const card = client.buildApprovalCard("Bash", {}, "s1", "qq_p", suggestions);
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    const labels = buttons.map((b) => b.render_data && b.render_data.label).filter(Boolean);
+    assert.ok(labels.some((l) => l.includes("Suggestion 1")));
+  });
 });
 
 describe("qq-bot-client: buildConfirmationCard", () => {
@@ -264,6 +289,106 @@ describe("qq-bot-client: buildConfirmationCard", () => {
     const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
     const card = client.buildConfirmationCard("Bash", "deny", "p1");
     assert.ok(card.markdown.content.includes("Denied"));
+  });
+});
+
+describe("qq-bot-client: buildElicitationCard", () => {
+  it("builds a card with question text and option buttons", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const toolInput = {
+      questions: [
+        { question: "Pick one", header: "Choice", options: [
+          { label: "Option A" }, { label: "Option B" }
+        ]}
+      ]
+    };
+    const card = client.buildElicitationCard(toolInput, "qq_e1", "AB");
+    assert.ok(card.markdown.content.includes("AskUserQuestion"));
+    assert.ok(card.markdown.content.includes("Pick one"));
+    assert.ok(card.markdown.content.includes("Choice"));
+    assert.ok(card.markdown.content.includes("AB")); // short code hint
+
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    assert.strictEqual(buttons.length, 2); // 2 options
+    assert.strictEqual(buttons[0].action.data, "qq_e1|elicitation:0:0");
+    assert.strictEqual(buttons[1].action.data, "qq_e1|elicitation:0:1");
+    assert.ok(buttons[0].render_data.label.includes("Option A"));
+    assert.ok(buttons[1].render_data.label.includes("Option B"));
+  });
+
+  it("handles empty questions gracefully", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const card = client.buildElicitationCard({ questions: [] }, "qq_e2", "");
+    assert.ok(card.markdown.content);
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    assert.strictEqual(buttons.length, 0);
+  });
+
+  it("limits to 5 options per question", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const options = Array.from({ length: 8 }, (_, i) => ({ label: `Opt ${i + 1}` }));
+    const card = client.buildElicitationCard(
+      { questions: [{ question: "Q?", options }] },
+      "qq_e3", ""
+    );
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    assert.ok(buttons.length <= 5);
+  });
+
+  it("supports up to 3 questions with distinct suggestion indices", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const toolInput = {
+      questions: [
+        { question: "Q1?", options: [{ label: "A1" }] },
+        { question: "Q2?", options: [{ label: "A2" }] },
+        { question: "Q3?", options: [{ label: "A3" }, { label: "B3" }] },
+        { question: "Q4?", options: [{ label: "A4" }] }, // should be capped at 3
+      ]
+    };
+    const card = client.buildElicitationCard(toolInput, "qq_e4", "");
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    // Q1:1 + Q2:1 + Q3:2 = 4 buttons
+    assert.strictEqual(buttons.length, 4);
+    assert.strictEqual(buttons[0].action.data, "qq_e4|elicitation:0:0");
+    assert.strictEqual(buttons[1].action.data, "qq_e4|elicitation:1:0");
+    assert.strictEqual(buttons[2].action.data, "qq_e4|elicitation:2:0");
+    assert.strictEqual(buttons[3].action.data, "qq_e4|elicitation:2:1");
+  });
+
+  it("multi-select: marks selected options and adds a submit button", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const toolInput = {
+      questions: [
+        { header: "部署", question: "选哪些环境?", multiSelect: true, options: [
+          { label: "测试" }, { label: "预发" }, { label: "生产" },
+        ]},
+      ],
+    };
+    // selections[0] = [0, 2] → 选中「测试」「生产」
+    const card = client.buildElicitationCard(toolInput, "qq_p", "AB", [[0, 2]]);
+    const md = card.markdown.content;
+    assert.ok(md.includes("✓ 测试"), "selected option marked with ✓");
+    assert.ok(md.includes("▢ 预发"), "unselected option marked with ▢");
+    assert.ok(md.includes("✓ 生产"), "selected option marked with ✓");
+
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    const submit = buttons.find((b) => b.action.data === "qq_p|elicitation-submit");
+    assert.ok(submit, "submit button exists with elicitation-submit behavior");
+    assert.ok(submit.render_data.label.includes("已选 2"), "submit label shows selected count");
+    // option buttons keep elicitation:<qi>:<oi> encoding
+    assert.ok(buttons.some((b) => b.action.data === "qq_p|elicitation:0:0"));
+  });
+
+  it("non-multi elicitation keeps the immediate-select card (no submit button)", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const toolInput = { questions: [
+      { question: "选一个", options: [{ label: "A" }, { label: "B" }] },
+    ]};
+    const card = client.buildElicitationCard(toolInput, "qq_p", "AB");
+    const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+    assert.ok(!buttons.some((b) => b.action.data === "qq_p|elicitation-submit"),
+      "single-select card has no submit button");
+    assert.ok(!card.markdown.content.includes("▢"), "single-select card has no checkbox glyphs");
   });
 });
 

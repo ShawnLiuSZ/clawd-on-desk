@@ -299,6 +299,31 @@ function createQQBotClient(config, options = {}) {
     return rows;
   }
 
+  // Generate a human-readable label for a permission suggestion, mirroring the
+  // logic in permission.js buildRemoteSuggestionLabel. Claude Code suggestions
+  // carry { type, mode/behavior/toolName } instead of a ready-made label.
+  function buildSuggestionLabel(s) {
+    if (!s || typeof s !== "object") return "";
+    // If the suggestion already has a label, use it (e.g. from CodeBuddy).
+    if (s.label && typeof s.label === "string" && s.label.trim()) return s.label.trim();
+    if (s.type === "setMode") {
+      if (s.mode === "acceptEdits") return "Auto edits";
+      if (s.mode === "plan") return "Plan mode";
+      const mode = mdSafe(s.mode || "");
+      return mode ? `Mode: ${mode}` : "";
+    }
+    if (s.type === "addRules") {
+      const rules = Array.isArray(s.rules) ? s.rules : [s];
+      const first = rules.find((rule) => rule && typeof rule === "object") || {};
+      const behavior = mdSafe(s.behavior || first.behavior || "allow");
+      const isDeny = behavior === "deny";
+      const toolName = mdSafe(first.toolName || s.toolName || "");
+      if (toolName) return isDeny ? `Always deny ${toolName}` : `Always ${toolName}`;
+      return isDeny ? "Always deny" : "Always allow";
+    }
+    return "";
+  }
+
   function buildApprovalCard(toolName, toolInput, sessionId, permId, suggestions, shortCode) {
     const sessionIdShort = sessionId ? String(sessionId).slice(-6) : "—";
     const lines = [
@@ -320,7 +345,7 @@ function createQQBotClient(config, options = {}) {
     if (Array.isArray(suggestions)) {
       for (let i = 0; i < suggestions.length && i < 3; i++) {
         const s = suggestions[i];
-        const label = s && s.label ? String(s.label).slice(0, 30) : `Suggestion ${i + 1}`;
+        const label = buildSuggestionLabel(s) || `Suggestion ${i + 1}`;
         buttons.push(makeButton(String(3 + i), `📋 ${label}`, permId, `suggestion:${i}`, 0));
       }
     }
@@ -355,6 +380,116 @@ function createQQBotClient(config, options = {}) {
       markdown: {
         content: `${emoji} **${label}**\n**Tool**: ${mdCode(toolName || "unknown")}\n**Decision**: ${label} via QQ`,
       },
+    };
+  }
+
+  // Build an elicitation (AskUserQuestion) card for QQ. Shows the question
+  // text and each option as an inline-keyboard button. Behavior encoding:
+  //   "<permId>|elicitation:<questionIndex>:<optionIndex>"
+  // Multi-question elicitation is supported — all questions' options are
+  // rendered as buttons (QQ allows up to 5 buttons per row, max rows vary).
+  // The user picks one option at a time; for single-question this resolves
+  // immediately. For multi-question the bridge handles sequential resolution.
+  function buildElicitationCard(toolInput, permId, shortCode, selections, warn) {
+    const questions = (toolInput && Array.isArray(toolInput.questions)) ? toolInput.questions : [];
+    const hasMulti = questions.some((q) => q && q.multiSelect);
+    if (hasMulti) {
+      return buildMultiSelectElicitationCard(questions, permId, shortCode, selections, warn);
+    }
+    return buildSingleSelectElicitationCard(questions, permId, shortCode);
+  }
+
+  // Existing single-select behavior: one tap resolves immediately.
+  function buildSingleSelectElicitationCard(questions, permId, shortCode) {
+    const lines = ["💬 **AskUserQuestion**"];
+    const allButtons = [];
+    let buttonId = 1;
+
+    for (let qi = 0; qi < questions.length && qi < 3; qi++) {
+      const q = questions[qi];
+      if (!q || typeof q !== "object") continue;
+      const header = mdSafe(q.header || "");
+      const prompt = mdSafe(q.question || "");
+      if (qi > 0) lines.push("");
+      if (header) lines.push(`**${header}**`);
+      lines.push(`${prompt}`);
+
+      const options = Array.isArray(q.options) ? q.options : [];
+      for (let oi = 0; oi < options.length && oi < 5; oi++) {
+        const opt = options[oi];
+        if (!opt || typeof opt !== "object") continue;
+        const optLabel = mdSafe(opt.label || `Option ${oi + 1}`).slice(0, 30);
+        allButtons.push(makeButton(String(buttonId++), optLabel, permId, `elicitation:${qi}:${oi}`, 0));
+      }
+    }
+
+    lines.push("");
+    lines.push(shortCode
+      ? `点按钮选择，或回复 \`y ${shortCode}\` 使用默认答案`
+      : "点击下方按钮选择");
+
+    return {
+      markdown: { content: lines.join("\n").slice(0, 1800) },
+      keyboard: { content: { rows: chunkRows(allButtons, 5) } },
+    };
+  }
+
+  // Multi-select: taps accumulate; user submits with a dedicated button. QQ can't
+  // edit a sent card, so each tap re-sends a fresh card reflecting `selections`.
+  // `selections` is an array indexed by question → array of selected option indices.
+  function buildMultiSelectElicitationCard(questions, permId, shortCode, selections, warn) {
+    const sel = Array.isArray(selections) ? selections : [];
+    const lines = ["💬 **AskUserQuestion**"];
+    const optionButtons = [];
+    let buttonId = 1;
+    let totalSelected = 0;
+
+    for (let qi = 0; qi < questions.length && qi < 3; qi++) {
+      const q = questions[qi];
+      if (!q || typeof q !== "object") continue;
+      const header = mdSafe(q.header || "");
+      const prompt = mdSafe(q.question || "");
+      if (qi > 0) lines.push("");
+      if (header) lines.push(`**${header}**`);
+      lines.push(`${prompt}`);
+
+      const selectedForQ = Array.isArray(sel[qi]) ? sel[qi] : [];
+      const options = Array.isArray(q.options) ? q.options : [];
+      for (let oi = 0; oi < options.length && oi < 5; oi++) {
+        const opt = options[oi];
+        if (!opt || typeof opt !== "object") continue;
+        const isSel = selectedForQ.indexOf(oi) !== -1;
+        if (isSel) totalSelected++;
+        const optLabel = mdSafe(opt.label || `Option ${oi + 1}`).slice(0, 28);
+        lines.push(`${isSel ? "✓" : "▢"} ${optLabel}`);
+        optionButtons.push(makeButton(
+          String(buttonId++),
+          `${isSel ? "✓ " : ""}${optLabel}`,
+          permId,
+          `elicitation:${qi}:${oi}`,
+          isSel ? 1 : 0
+        ));
+      }
+    }
+
+    lines.push("");
+    if (warn) lines.push("⚠️ 还有题未选，请每道题至少选一个");
+    lines.push("点按钮切换选择，选好后点「完成」提交");
+
+    const submitButton = makeButton(
+      String(buttonId++),
+      `✅ 完成 (已选 ${totalSelected})`,
+      permId,
+      "elicitation-submit",
+      1
+    );
+
+    const rows = chunkRows(optionButtons, 5);
+    rows.push({ buttons: [submitButton] });
+
+    return {
+      markdown: { content: lines.join("\n").slice(0, 1800) },
+      keyboard: { content: { rows } },
     };
   }
 
@@ -677,6 +812,7 @@ function createQQBotClient(config, options = {}) {
     sendCardMessage,
     sendC2CMessage,
     buildApprovalCard,
+    buildElicitationCard,
     buildConfirmationCard,
     onInteraction,
     onOpenidDiscovered,
