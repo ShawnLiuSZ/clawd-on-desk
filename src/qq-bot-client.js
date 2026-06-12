@@ -327,29 +327,40 @@ function createQQBotClient(config, options = {}) {
 
   function buildApprovalCard(toolName, toolInput, sessionId, permId, suggestions, shortCode) {
     const sessionIdShort = sessionId ? String(sessionId).slice(-6) : "—";
+
+    // Resolve suggestion labels once — they feed both the body and the buttons.
+    const sugLabels = [];
+    if (Array.isArray(suggestions)) {
+      for (let i = 0; i < suggestions.length && i < 3; i++) {
+        sugLabels.push(buildSuggestionLabel(suggestions[i]) || `Suggestion ${i + 1}`);
+      }
+    }
+
     const lines = [
       `🔐 **${mdSafe(toolName || "Permission Request")}**`,
       `**Agent**: Claude Code`,
       `**Tool**: ${mdCode(toolName || "unknown")}`,
       ...formatToolDetailLines(toolName, toolInput),
       `**Session**: ${mdCode(sessionIdShort)}`,
-      "",
-      shortCode
-        ? `点按钮，或回复 \`y ${shortCode}\` 允许 / \`n ${shortCode}\` 拒绝`
-        : "点击下方按钮选择",
-    ].filter((l) => l !== null);
+    ];
+    // List suggestions in full in the body — QQ truncates long button labels
+    // client-side, so the wrapping markdown body is where the full text survives.
+    if (sugLabels.length) {
+      lines.push("**建议**:");
+      sugLabels.forEach((label, i) => lines.push(`${i + 1}. 📋 ${mdSafe(label)}`));
+    }
+    lines.push("");
+    lines.push(shortCode
+      ? `点按钮，或回复 \`y ${shortCode}\` 允许 / \`n ${shortCode}\` 拒绝`
+      : "点击下方按钮选择");
 
     const buttons = [
       makeButton("1", "✅ Allow", permId, "allow", 1),
       makeButton("2", "❌ Deny", permId, "deny", 0),
     ];
-    if (Array.isArray(suggestions)) {
-      for (let i = 0; i < suggestions.length && i < 3; i++) {
-        const s = suggestions[i];
-        const label = buildSuggestionLabel(s) || `Suggestion ${i + 1}`;
-        buttons.push(makeButton(String(3 + i), `📋 ${label}`, permId, `suggestion:${i}`, 0));
-      }
-    }
+    sugLabels.forEach((label, i) => {
+      buttons.push(makeButton(String(3 + i), `📋 ${i + 1}. ${label}`, permId, `suggestion:${i}`, 0));
+    });
     return {
       // Clamp total content — QQ rejects over-long markdown bodies.
       markdown: { content: lines.join("\n").slice(0, 1800) },

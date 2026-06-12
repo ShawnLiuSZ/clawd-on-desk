@@ -227,6 +227,17 @@ describe("qq-bot-client: buildApprovalCard", () => {
     assert.ok(sug.render_data.label.includes(longTool), "full tool name preserved");
   });
 
+  it("lists full suggestion text in the body so long labels survive button truncation", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const longTool = "X".repeat(80);
+    const card = client.buildApprovalCard("Bash", { command: "ls" }, "s1", "qq_p", [
+      { type: "addRules", behavior: "deny", toolName: longTool },
+    ], "AB");
+    // QQ truncates long button labels client-side, so the full text must also live
+    // in the wrapping markdown body where it renders in full.
+    assert.ok(card.markdown.content.includes(longTool), "full suggestion text appears in card body");
+  });
+
   it("handles missing tool input gracefully", () => {
     const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
     const card = client.buildApprovalCard(null, null, null, "qq_perm2", []);
