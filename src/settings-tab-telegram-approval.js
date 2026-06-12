@@ -1173,17 +1173,7 @@
         link.style.cursor = "pointer";
         link.addEventListener("click", (e) => {
           e.preventDefault();
-          // Use Electron's shell to open in default browser
-          // which will redirect to WeChat if installed
-          try {
-            const { shell } = require("electron");
-            shell.openExternal(loginUrl);
-          } catch {
-            // Fallback: copy to clipboard
-            navigator.clipboard.writeText(loginUrl).then(() => {
-              ops.showToast("URL copied — paste it in WeChat or a browser.");
-            }).catch(() => {});
-          }
+          helpers.openExternalSafe(loginUrl);
         });
         linkContainer.appendChild(link);
 
