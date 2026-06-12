@@ -582,6 +582,8 @@ function createQQBotClient(config, options = {}) {
 
   function handleC2CMessage(eventData) {
     const discoveredOpenid = extractOpenidFromEvent(eventData);
+    // Three outcomes: (1) pair-when-empty — first C2C sender becomes the anchor;
+    // (2) ignore-different-sender — a second sender is silently dropped; (3) repeat same sender — no-op.
     if (discoveredOpenid && !userOpenid) {
       userOpenid = discoveredOpenid;
       logFn(`qq-bot: paired userOpenid from C2C message — ${discoveredOpenid.slice(0, 12)}…`);
@@ -597,6 +599,8 @@ function createQQBotClient(config, options = {}) {
     // replies (the fallback when QQ buttons aren't tappable on a client).
     const text = eventData && typeof eventData.content === "string" ? eventData.content.trim() : "";
     if (text) {
+      // Surface the REAL inbound sender openid (discoveredOpenid), not the stored
+      // anchor, so the approval bridge can reject non-authorized senders.
       for (const listener of messageListeners) {
         try { listener({ text, userOpenid: discoveredOpenid || userOpenid }); }
         catch (err) { logFn(`qq-bot: message listener error: ${compactLog(err, 100)}`); }
