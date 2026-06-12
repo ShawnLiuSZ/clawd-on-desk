@@ -8,9 +8,6 @@
 //   - sendMessage for sending text replies
 //   - Context-token tracking for conversation threading
 //
-// Differences from QQ Bot:
-//   - No WebSocket — long-poll HTTP POST with cursor-based pagination
-//   - No interactive cards — text-only messages
 //   - context_token required for every reply (carried from incoming msg)
 //   - X-WECHAT-UIN anti-replay header regenerated per request
 //
