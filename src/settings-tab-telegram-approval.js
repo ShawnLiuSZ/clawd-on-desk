@@ -29,6 +29,7 @@
     wechatBotEditing: false,
     wechatBotQrcodePending: false,
     wechatBotQrcodeImage: null,
+    wechatBotQrcodeUrl: null,
     wechatBotQrcodeKey: null,
     wechatBotQrcodePollTimer: null,
     wechatBotQrcodeError: null,
@@ -1152,21 +1153,56 @@
       qrRow.appendChild(qrText);
 
       if (view.wechatBotQrcodeImage) {
-        const img = document.createElement("img");
-        img.src = view.wechatBotQrcodeImage;
-        img.alt = "WeChat login QR code";
-        img.style.width = "180px";
-        img.style.height = "180px";
-        img.style.margin = "8px 0";
-        img.style.borderRadius = "8px";
-        img.style.alignSelf = "center";
-        qrRow.appendChild(img);
+        // Show the login URL as a clickable link — the user should open it
+        // in WeChat on their phone to complete login. The URL is a WeChat
+        // Mini Program path (liteapp.weixin.qq.com) that triggers login.
+        const linkContainer = document.createElement("div");
+        linkContainer.style.display = "flex";
+        linkContainer.style.flexDirection = "column";
+        linkContainer.style.alignItems = "center";
+        linkContainer.style.gap = "8px";
+        linkContainer.style.margin = "8px 0";
+
+        const loginUrl = view.wechatBotQrcodeUrl || view.wechatBotQrcodeImage;
+
+        const link = document.createElement("a");
+        link.href = loginUrl;
+        link.textContent = "Open WeChat Login Link";
+        link.className = "soft-btn accent";
+        link.style.textDecoration = "none";
+        link.style.cursor = "pointer";
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          // Use Electron's shell to open in default browser
+          // which will redirect to WeChat if installed
+          try {
+            const { shell } = require("electron");
+            shell.openExternal(loginUrl);
+          } catch {
+            // Fallback: copy to clipboard
+            navigator.clipboard.writeText(loginUrl).then(() => {
+              ops.showToast("URL copied — paste it in WeChat or a browser.");
+            }).catch(() => {});
+          }
+        });
+        linkContainer.appendChild(link);
 
         const hint = document.createElement("span");
         hint.className = "row-desc";
-        hint.textContent = "Open WeChat on your phone, scan QR code, and tap Login.";
+        hint.textContent = "Click the link above, then confirm login in WeChat on your phone.";
         hint.style.textAlign = "center";
-        qrRow.appendChild(hint);
+        linkContainer.appendChild(hint);
+
+        // Also show the raw URL for reference
+        const urlText = document.createElement("div");
+        urlText.className = "row-desc";
+        urlText.style.fontSize = "11px";
+        urlText.style.wordBreak = "break-all";
+        urlText.style.opacity = "0.6";
+        urlText.textContent = loginUrl;
+        linkContainer.appendChild(urlText);
+
+        qrRow.appendChild(linkContainer);
       }
 
       if (view.wechatBotQrcodeError) {
@@ -1236,6 +1272,7 @@
         return;
       }
       view.wechatBotQrcodeImage = normalizeQrcodeImage(result.qrcodeImg);
+      view.wechatBotQrcodeUrl = result.loginUrl || null;
       view.wechatBotQrcodeKey = result.qrcode;
       ops.requestRender({ content: true });
       // Start polling for scan status
@@ -1271,11 +1308,13 @@
       } else if (result.status === "error") {
         view.wechatBotQrcodeError = result.message || "QR code expired or login failed";
         view.wechatBotQrcodeImage = null;
+        view.wechatBotQrcodeUrl = null;
         view.wechatBotQrcodeKey = null;
         ops.requestRender({ content: true });
       } else if (result.status === "timeout") {
         view.wechatBotQrcodeError = "QR code expired. Please generate a new one.";
         view.wechatBotQrcodeImage = null;
+        view.wechatBotQrcodeUrl = null;
         view.wechatBotQrcodeKey = null;
         ops.requestRender({ content: true });
       }
@@ -1293,6 +1332,7 @@
       view.wechatBotQrcodePollTimer = null;
     }
     view.wechatBotQrcodeImage = null;
+    view.wechatBotQrcodeUrl = null;
     view.wechatBotQrcodeKey = null;
     view.wechatBotQrcodeError = null;
     ops.requestRender({ content: true });

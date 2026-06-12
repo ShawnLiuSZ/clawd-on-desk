@@ -124,7 +124,7 @@ async function fetchQrcode(baseUrl = DEFAULT_BASE_URL) {
     }
   }
 
-  return { qrcodeImg, qrcode };
+  return { qrcodeImg, loginUrl: qrContent, qrcode };
 }
 
 async function pollQrcodeStatus(qrcodeKey, baseUrl = DEFAULT_BASE_URL) {
