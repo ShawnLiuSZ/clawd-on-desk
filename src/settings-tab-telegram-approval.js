@@ -21,6 +21,11 @@
     testPending: false,
     formDraft: null,
     formDirty: false,
+    wechatBotTestPending: false,
+    wechatBotTestResult: null,
+    wechatBotTestSeq: 0,
+    wechatBotDraft: null,
+    wechatBotDirty: false,
   };
 
   function t(key) {
@@ -161,6 +166,7 @@
     // page can stay tidy as external approval channels grow.
     parent.appendChild(buildTelegramChannelCard());
     parent.appendChild(buildHardwareBuddyChannelCard());
+    parent.appendChild(buildWechatBotChannelCard());
   }
 
   // ── v0.9.0 migration card ──────────────────────────────────────────────────
@@ -942,6 +948,210 @@
     ctrl.appendChild(btn);
     row.appendChild(ctrl);
     return row;
+  }
+
+  // ── WeChat Bot channel card ──
+
+  function currentWechatBotConfig() {
+    const cfg = state.snapshot && state.snapshot.wechatBot;
+    return {
+      enabled: !!(cfg && cfg.enabled),
+      token: cfg && typeof cfg.token === "string" ? cfg.token : "",
+      approvalEnabled: !!(cfg && cfg.approvalEnabled !== false),
+      baseUrl: cfg && typeof cfg.baseUrl === "string" ? cfg.baseUrl : "",
+      accountId: cfg && typeof cfg.accountId === "string" ? cfg.accountId : "default",
+    };
+  }
+
+  function wechatBotStatusKind(cfg) {
+    if (!cfg.token) return "incomplete";
+    return "ready";
+  }
+
+  function buildWechatBotChannelCard() {
+    const cfg = currentWechatBotConfig();
+    const statusKind = wechatBotStatusKind(cfg);
+    return helpers.buildCollapsibleGroup({
+      id: "remote-approval.wechat-bot",
+      headerContent: buildWechatBotChannelHeader(statusKind),
+      defaultCollapsed: false,
+      className: "remote-approval-channel-card",
+      children: [
+        buildWechatBotStatusRow(cfg, statusKind),
+        helpers.buildSection(t("wechatBotToken"), [buildWechatBotTokenRow(cfg)]),
+        helpers.buildSection("Enable / Test", [buildWechatBotEnabledRow(cfg), buildWechatBotTestRow(cfg)]),
+      ],
+    });
+  }
+
+  function buildWechatBotChannelHeader(kind) {
+    const container = document.createElement("div");
+    container.style.display = "flex";
+    container.style.alignItems = "center";
+    container.style.justifyContent = "space-between";
+    container.style.flex = "1";
+    container.style.gap = "8px";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "settings-label";
+    nameEl.textContent = t("wechatBot");
+    container.appendChild(nameEl);
+
+    const badge = document.createElement("span");
+    badge.className = "settings-badge";
+    if (kind === "ready") {
+      badge.style.backgroundColor = "var(--color-background-success)";
+      badge.style.color = "var(--color-text-success)";
+      badge.textContent = t("wechatBotConnected");
+    } else {
+      badge.style.backgroundColor = "var(--color-background-warning)";
+      badge.style.color = "var(--color-text-warning)";
+      badge.textContent = t("wechatBotDisconnected");
+    }
+    container.appendChild(badge);
+
+    return container;
+  }
+
+  function buildWechatBotStatusRow(cfg, kind) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const desc = document.createElement("span");
+    desc.className = "settings-description";
+    desc.style.padding = "8px 0";
+    desc.textContent = kind === "ready"
+      ? t("wechatBotDescription")
+      : t("wechatBotConfigIncomplete");
+    row.appendChild(desc);
+
+    return row;
+  }
+
+  function buildWechatBotTokenRow(cfg) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "8px";
+
+    const input = document.createElement("input");
+    input.type = "password";
+    input.className = "settings-input";
+    input.placeholder = "ilink Bearer Token";
+    input.value = cfg.token ? "********" : "";
+    input.style.flex = "1";
+    input.addEventListener("change", () => {
+      if (input.value && input.value !== "********") {
+        view.wechatBotDraft = { value: input.value };
+        view.wechatBotDirty = true;
+        saveWechatBotToken(input.value);
+      }
+    });
+    input.addEventListener("focus", () => {
+      if (input.value === "********") {
+        input.value = "";
+      }
+    });
+    row.appendChild(input);
+
+    return row;
+  }
+
+  function buildWechatBotEnabledRow(cfg) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.justifyContent = "space-between";
+
+    const label = document.createElement("span");
+    label.className = "settings-label";
+    label.textContent = t("wechatBotApprovalEnabled");
+
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.className = "settings-toggle";
+    toggle.checked = cfg.approvalEnabled;
+    toggle.addEventListener("change", () => {
+      saveWechatBotField("approvalEnabled", toggle.checked);
+    });
+
+    row.appendChild(label);
+    row.appendChild(toggle);
+    return row;
+  }
+
+  function buildWechatBotTestRow(cfg) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+    row.style.display = "flex";
+    row.style.flexDirection = "column";
+    row.style.gap = "4px";
+
+    const ready = wechatBotStatusKind(cfg) === "ready";
+    const testDisabled = view.wechatBotTestPending || !ready || !cfg.enabled;
+
+    const btn = document.createElement("button");
+    btn.className = "settings-button";
+    btn.style.alignSelf = "flex-start";
+    btn.textContent = view.wechatBotTestPending ? "Testing…" : t("wechatBotTestConnection");
+    btn.disabled = testDisabled;
+    btn.style.opacity = testDisabled ? "0.5" : "1";
+    btn.style.cursor = testDisabled ? "not-allowed" : "pointer";
+    btn.addEventListener("click", () => {
+      view.wechatBotTestPending = true;
+      view.wechatBotTestResult = null;
+      view.wechatBotTestSeq = Date.now();
+      callCommand("wechatBot.test").then((result) => {
+        view.wechatBotTestPending = false;
+        view.wechatBotTestResult = result;
+        if (result && result.status === "ok") {
+          ops.showToast(t("wechatBotTestSuccess"));
+        } else {
+          ops.showToast((result && result.message) || t("wechatBotTestFailed"), { error: true });
+        }
+        ops.requestRender({ content: true });
+      }).catch((err) => {
+        view.wechatBotTestPending = false;
+        view.wechatBotTestResult = { status: "error", message: err && err.message };
+        ops.showToast(t("wechatBotTestFailed"), { error: true });
+        ops.requestRender({ content: true });
+      });
+    });
+    row.appendChild(btn);
+
+    if (view.wechatBotTestResult && view.wechatBotTestResult.status !== "ok") {
+      const errEl = document.createElement("span");
+      errEl.className = "settings-error";
+      errEl.textContent = view.wechatBotTestResult.message || "Unknown error";
+      row.appendChild(errEl);
+    }
+
+    return row;
+  }
+
+  function saveWechatBotToken(token) {
+    saveWechatBotField("token", token);
+  }
+
+  function saveWechatBotField(key, value) {
+    if (!window.settingsAPI || typeof window.settingsAPI.update !== "function") {
+      ops.showToast(t("toastSaveFailed") + "settings API unavailable", { error: true });
+      return;
+    }
+    const current = (state.snapshot && state.snapshot.wechatBot) ? { ...state.snapshot.wechatBot } : {};
+    current[key] = value;
+    window.settingsAPI.update("wechatBot", current).then((result) => {
+      if (!result || result.status !== "ok") {
+        ops.showToast((result && result.message) || t("toastSaveFailed"), { error: true });
+      } else {
+        ops.showToast("WeChat Bot config saved.");
+      }
+      ops.requestRender({ content: true });
+    }).catch((err) => {
+      ops.showToast(t("toastSaveFailed") + (err && err.message), { error: true });
+    });
   }
 
   // ── Save / shared ──

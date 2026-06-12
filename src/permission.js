@@ -1022,6 +1022,7 @@ function dismissPermissionForTerminal(perm) {
   // Cancel before splicing so a late Telegram decision can't slip in between
   // the splice and the abort.
   cancelRemoteApproval(perm);
+  cancelWechatApproval(perm);
   const idx = pendingPermissions.indexOf(perm);
   if (idx !== -1) {
     pendingPermissions.splice(idx, 1);
@@ -1104,6 +1105,46 @@ function maybeStartRemoteApproval(permEntry) {
   return true;
 }
 
+function getWechatApprovalBridge() {
+  if (typeof ctx.getWechatApprovalBridge === "function") {
+    try { return ctx.getWechatApprovalBridge(); } catch (err) {
+      permLog(`wechat approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.wechatApprovalBridge || null;
+}
+
+function cancelWechatApproval(permEntry) {
+  const bridge = getWechatApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
+function maybeStartRemoteWechatApproval(permEntry) {
+  if (!isRemoteApprovalActionable(permEntry)) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const bridge = getWechatApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    resolvePermissionEntry(entry, behavior);
+  };
+  try {
+    bridge.requestApproval(permEntry, resolveFn, wxConfig);
+  } catch (err) {
+    permLog(`wechat remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
 function applyPermissionSuggestion(perm, index, options = {}) {
   const suggestion = perm && Array.isArray(perm.suggestions) ? perm.suggestions[index] : null;
   if (!suggestion) return false;
@@ -1139,6 +1180,7 @@ function applyPermissionSuggestion(perm, index, options = {}) {
   const idx = pendingPermissions.indexOf(permEntry);
   if (idx === -1) return;
   cancelRemoteApproval(permEntry);
+  cancelWechatApproval(permEntry);
 
   // Minimum display time: if bubble just appeared and dismiss is automatic
   // (client disconnect / terminal answer), delay so user can see it briefly
@@ -1750,6 +1792,7 @@ function dismissInteractivePermissionWithoutDecision(perm, reason) {
     notifyPermissionsChanged("dismissed");
   }
   cancelRemoteApproval(perm);
+  cancelWechatApproval(perm);
   if (perm._delayTimer) { clearTimeout(perm._delayTimer); perm._delayTimer = null; }
   if (perm.autoCloseTimer) { clearTimeout(perm.autoCloseTimer); perm.autoCloseTimer = null; }
   if (perm.abortHandler && perm.res) {
@@ -1885,6 +1928,7 @@ return {
   pendingPermissions, PASSTHROUGH_TOOLS,
   addPendingPermission, removePendingPermission,
   maybeStartRemoteApproval,
+  maybeStartRemoteWechatApproval,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,

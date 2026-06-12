@@ -258,6 +258,17 @@ function startRemoteApproval(ctx, permEntry) {
   }
 }
 
+function startRemoteWechatApproval(ctx, permEntry) {
+  if (permEntry && permEntry.toolName === "ExitPlanMode") return;
+  // WeChat is text-only — no elicitation card support.
+  if (permEntry && permEntry.isElicitation) return;
+  if (typeof ctx.maybeStartRemoteWechatApproval !== "function") return;
+  try {
+    ctx.maybeStartRemoteWechatApproval(permEntry);
+  } catch (err) {
+    ctx.permLog(`wechat remote approval start failed: ${err && err.message ? err.message : err}`);
+  }
+}
 function addPendingPermission(ctx, permEntry) {
   if (typeof ctx.addPendingPermission === "function") {
     return ctx.addPendingPermission(permEntry);
@@ -563,6 +574,7 @@ function handlePermissionPost(req, res, options) {
           return;
         }
         startRemoteApproval(ctx, permEntry);
+        startRemoteWechatApproval(ctx, permEntry);
         return;
       }
 
@@ -660,6 +672,7 @@ function handlePermissionPost(req, res, options) {
           return;
         }
         startRemoteApproval(ctx, permEntry);
+        startRemoteWechatApproval(ctx, permEntry);
         return;
       }
 
@@ -1134,6 +1147,7 @@ function handlePermissionPost(req, res, options) {
         return;
       }
       startRemoteApproval(ctx, permEntry);
+      startRemoteWechatApproval(ctx, permEntry);
     } catch (err) {
       ctx.permLog(`/permission handler error: ${err && err.message}`);
       // Response may already be sent (opencode branch 200-ACKs before

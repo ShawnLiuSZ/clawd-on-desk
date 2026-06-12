@@ -126,6 +126,7 @@ const {
   validateTelegramApproval,
   validateTelegramBotToken,
 } = require("./telegram-approval-settings");
+const { validateWechatBot } = require("./wechat-bot-settings");
 const { EVENTS: TELEGRAM_MIGRATION_EVENTS } = require("./telegram-migration-state");
 const {
   validateHardwareBuddySettings,
@@ -435,6 +436,9 @@ const updateRegistry = {
   },
   tgApproval(value) {
     return validateTelegramApproval(value);
+  },
+  wechatBot(value) {
+    return validateWechatBot(value);
   },
 
   // v0.9.0 spike: persisted migration state across restarts. Shape:
@@ -1130,6 +1134,14 @@ async function telegramApprovalSendTest(_payload, deps = {}) {
   return result || { status: "error", message: "Telegram approval test returned no result" };
 }
 
+async function wechatBotTest(_payload, deps = {}) {
+  if (!deps || typeof deps.testWechatBotConnection !== "function") {
+    return { status: "error", message: "wechatBot.test requires testWechatBotConnection dep" };
+  }
+  const result = await deps.testWechatBotConnection();
+  return result || { status: "error", message: "WeChat Bot test returned no result" };
+}
+
 function cleanupMessage(result) {
   const summary = result && result.summary;
   if (!summary) return "Integration cleanup finished";
@@ -1322,6 +1334,7 @@ const commandRegistry = {
   "telegramApproval.status": telegramApprovalStatus,
   "telegramApproval.tokenInfo": telegramApprovalTokenInfo,
   "telegramApproval.test": telegramApprovalSendTest,
+  "wechatBot.test": wechatBotTest,
   "telegramMigration.snapshot": telegramMigrationSnapshot,
   "telegramMigration.dispatch": telegramMigrationDispatch,
 };

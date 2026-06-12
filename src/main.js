@@ -29,6 +29,10 @@ const {
 } = require("./telegram-approval-runtime-status");
 const { createTelegramMigrationController } = require("./telegram-migration-controller");
 const { createTelegramSidecarStatusBridge } = require("./telegram-sidecar-status-bridge");
+const { createWechatIlinkClient } = require("./wechat-ilink-client");
+const { createWechatApprovalBridge } = require("./wechat-approval");
+const { normalizeWechatBot } = require("./wechat-bot-settings");
+const WebSocket = require("ws");
 const initUpdateBubble = require("./update-bubble");
 const { registerUpdateBubbleIpc } = initUpdateBubble;
 const createSettingsAnimationOverridesMain = require("./settings-animation-overrides-main");
@@ -284,6 +288,7 @@ const _settingsController = createSettingsController({
     getTelegramApprovalTokenInfo: () => getTelegramApprovalTokenInfo(),
     sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     deleteTelegramApprovalTokenFile: () => deleteTelegramApprovalTokenFile(),
+    testWechatBotConnection: () => testWechatBotConnection(),
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1103,6 +1108,64 @@ const {
   isCodexPermissionInterceptEnabled: _isCodexPermissionInterceptEnabled,
   shouldSyncAgentIntegration: _shouldSyncAgentIntegration,
 } = require("./agent-gate");
+
+let _wechatClient = null;
+let _wechatApprovalBridge = null;
+
+function getOrCreateWechatClient() {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (!wxConfig || !wxConfig.enabled) {
+    _wechatClient = null;
+    return null;
+  }
+  const normalized = normalizeWechatBot(wxConfig);
+  if (_wechatClient) {
+    _wechatClient.updateConfig(normalized);
+    return _wechatClient;
+  }
+  _wechatClient = createWechatIlinkClient(normalized, { log: console.log });
+  // Start long-polling immediately so the approval bridge can discover
+  // from_user_id and context_token from the first user message.
+  _wechatClient.startPolling().catch((err) => {
+    console.log(`wechat-ilink: poll start failed — ${err && err.message ? err.message : String(err)}`);
+  });
+  return _wechatClient;
+}
+
+function getOrCreateWechatApprovalBridge() {
+  if (_wechatApprovalBridge) return _wechatApprovalBridge;
+  const client = getOrCreateWechatClient();
+  if (!client) return null;
+  _wechatApprovalBridge = createWechatApprovalBridge(client, { log: console.log });
+  try { _wechatApprovalBridge.start(); } catch (err) {
+    console.log(`wechat-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+  return _wechatApprovalBridge;
+}
+
+
+async function testWechatBotConnection() {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (!wxConfig || !wxConfig.enabled) {
+    return { status: "error", message: "WeChat Bot is not enabled" };
+  }
+  const normalized = normalizeWechatBot(wxConfig);
+  if (!normalized.token) {
+    return { status: "error", message: "WeChat Bot token is not configured" };
+  }
+  const client = getOrCreateWechatClient();
+  if (!client) {
+    return { status: "error", message: "WeChat Bot client failed to initialize" };
+  }
+  if (!client.isConfigured()) {
+    return { status: "error", message: "WeChat Bot configuration is incomplete" };
+  }
+  if (client.isConnected()) {
+    return { status: "ok", message: "WeChat Bot is connected and polling for messages." };
+  }
+  return { status: "ok", message: "WeChat Bot is configured. Long-polling will connect on next message cycle." };
+}
+
 const _permCtx = {
   get win() { return win; },
   get lang() { return lang; },
@@ -1143,6 +1206,12 @@ const _permCtx = {
   clearShortcutFailure: (actionId) => shortcutRuntime.clearFailure(actionId),
   repositionUpdateBubble: () => repositionUpdateBubble(),
   getTelegramApprovalClient: () => getTelegramApprovalClient(),
+  getWechatApprovalBridge: () => getOrCreateWechatApprovalBridge(),
+  getWechatBotConfig: () => {
+    if (!_settingsController) return null;
+    const wxConfig = _settingsController.get("wechatBot");
+    return wxConfig ? normalizeWechatBot(wxConfig) : null;
+  },
   onPermissionsChanged: () => {
     if (hardwareBuddyAdapter) hardwareBuddyAdapter.notifyPermissionsChanged();
   },
@@ -1152,7 +1221,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteWechatApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -2831,6 +2900,24 @@ _settingsController.subscribeKey("tgApproval", () => {
   if (suppressTelegramApprovalSidecarSync > 0) return;
   queueTelegramApprovalSidecarSync("settings");
 });
+_settingsController.subscribeKey("wechatBot", () => {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (wxConfig && wxConfig.enabled) {
+    getOrCreateWechatClient();
+  } else {
+    if (_wechatClient) {
+      _wechatClient.disconnect();
+      _wechatClient = null;
+    }
+  }
+});
+// Startup: if WeChat Bot was already enabled, start long-polling now.
+{
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (wxConfig && wxConfig.enabled) {
+    getOrCreateWechatClient();
+  }
+}
 _settingsController.subscribeKey("mobilePreviewEnabled", async (enabled) => {
   if (enabled) {
     if (!_lanWss) {
