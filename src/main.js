@@ -1115,7 +1115,7 @@ function persistQQBotOpenidToSettings(newOpenid) {
   if (!_settingsController || !newOpenid) return;
   const current = _settingsController.get("qqBot");
   if (!current || !current.enabled) return;
-  if (current.userOpenid === newOpenid) return;
+  if (current.userOpenid) return; // anchor already pinned; do not overwrite
   try {
     _settingsController.applyUpdate("qqBot", {
       ...(current || {}),
@@ -1153,7 +1153,16 @@ function getOrCreateQQApprovalBridge() {
   if (_qqApprovalBridge) return _qqApprovalBridge;
   const client = getOrCreateQQBotClient();
   if (!client) return null;
-  _qqApprovalBridge = createQQApprovalBridge(client, { log: console.log });
+  _qqApprovalBridge = createQQApprovalBridge(client, {
+    log: console.log,
+    // Single source of truth for the trust anchor: the persisted/configured
+    // userOpenid in settings. The client no longer overwrites this with a
+    // different sender (see qq-bot-client pairing logic).
+    getAuthorizedOpenid: () => {
+      const c = _settingsController ? _settingsController.get("qqBot") : null;
+      return (c && c.userOpenid) || "";
+    },
+  });
   // Subscribe button + text-reply listeners up front so callbacks resolve even
   // for the very first approval.
   try { _qqApprovalBridge.start(); } catch (err) {
