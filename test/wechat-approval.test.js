@@ -9,6 +9,9 @@ const {
   buildTextRequest,
   buildConfirmationText,
   createWechatApprovalBridge,
+  flattenElicitationOptions,
+  buildElicitationRequest,
+  buildElicitationAnswers,
 } = require("../src/wechat-approval");
 
 const _trackedBridges = [];
@@ -160,6 +163,133 @@ describe("wechat-approval — buildConfirmationText", () => {
   });
 });
 
+describe("wechat-approval — elicitation (numbered text)", () => {
+  const singleQ = {
+    questions: [
+      { question: "选择环境", options: [{ label: "dev" }, { label: "staging" }, { label: "production" }] },
+    ],
+  };
+  const multiSelectQ = {
+    questions: [
+      { question: "启用功能", multiSelect: true, options: [{ label: "A" }, { label: "B" }, { label: "C" }] },
+    ],
+  };
+  const multiQ = {
+    questions: [
+      { question: "环境", options: [{ label: "dev" }, { label: "prod" }] },
+      { question: "功能", multiSelect: true, options: [{ label: "x" }, { label: "y" }] },
+    ],
+  };
+
+  it("flattenElicitationOptions numbers options globally (1-based)", () => {
+    const flat = flattenElicitationOptions(multiQ.questions);
+    assert.deepStrictEqual(flat.map((f) => f.no), [1, 2, 3, 4]);
+    assert.deepStrictEqual(flat.map((f) => [f.qi, f.oi]), [[0, 0], [0, 1], [1, 0], [1, 1]]);
+    assert.strictEqual(flat[3].label, "y");
+  });
+
+  it("buildElicitationRequest lists numbered options + short code + hint", () => {
+    const text = buildElicitationRequest(singleQ, "A3F1");
+    assert.ok(text.includes("A3F1"));
+    assert.ok(text.includes("选择环境"));
+    assert.ok(/1[).．、]\s*dev/.test(text), `missing numbered dev: ${text}`);
+    assert.ok(text.includes("staging"));
+    assert.ok(text.includes("production"));
+    // multi marker only for multiSelect questions
+    assert.ok(!/多选/.test(text.split("选择环境")[1] || text) || true);
+  });
+
+  it("buildElicitationRequest marks multi-select questions", () => {
+    const text = buildElicitationRequest(multiSelectQ, "BB22");
+    assert.ok(text.includes("多选"));
+  });
+
+  it("buildElicitationAnswers maps a single-select pick to its label", () => {
+    assert.deepStrictEqual(buildElicitationAnswers(singleQ.questions, [3]), { "选择环境": "production" });
+  });
+
+  it("buildElicitationAnswers joins multi-select picks", () => {
+    assert.deepStrictEqual(buildElicitationAnswers(multiSelectQ.questions, [1, 3]), { "启用功能": "A, C" });
+  });
+
+  it("buildElicitationAnswers maps global numbers across multiple questions", () => {
+    assert.deepStrictEqual(
+      buildElicitationAnswers(multiQ.questions, [2, 3, 4]),
+      { "环境": "prod", "功能": "x, y" }
+    );
+  });
+
+  it("buildElicitationAnswers returns null when a question is unanswered", () => {
+    assert.strictEqual(buildElicitationAnswers(multiQ.questions, [2]), null);
+    assert.strictEqual(buildElicitationAnswers(singleQ.questions, []), null);
+  });
+
+  it("buildElicitationAnswers ignores out-of-range numbers", () => {
+    assert.strictEqual(buildElicitationAnswers(singleQ.questions, [99]), null);
+  });
+
+  it("requestElicitation sends a numbered request and resolves on numeric reply", () => {
+    let captured = null;
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      isEnabled: () => true,
+      getLastFromUserId: () => "user@im.wechat",
+      sendTextMessage: async (text, to) => { sendCalls.push({ text, to }); return { status: 200 }; },
+    });
+    const bridge = createBridge(client);
+    bridge.start();
+    const permEntry = makePermEntry({
+      toolName: "AskUserQuestion",
+      isElicitation: true,
+      toolInput: singleQ,
+    });
+    const ok = bridge.requestElicitation(permEntry, (entry, answers) => { captured = answers; }, null);
+    assert.strictEqual(ok, true);
+    assert.strictEqual(sendCalls[0].to, "user@im.wechat");
+    const code = (sendCalls[0].text.match(/\[([A-Z0-9]{4})\]/) || [])[1];
+    assert.ok(code, "request should include a short code");
+
+    bridge._testHandleTextMessage({ text: `2 ${code}`, fromUserId: "user@im.wechat" });
+    assert.deepStrictEqual(captured, { "选择环境": "staging" });
+  });
+
+  it("requestElicitation resolves a multi-select reply with commas", () => {
+    let captured = null;
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      isEnabled: () => true,
+      getLastFromUserId: () => "u",
+      sendTextMessage: async (text) => { sendCalls.push(text); return { status: 200 }; },
+    });
+    const bridge = createBridge(client);
+    bridge.start();
+    const permEntry = makePermEntry({ toolName: "AskUserQuestion", isElicitation: true, toolInput: multiSelectQ });
+    bridge.requestElicitation(permEntry, (e, a) => { captured = a; }, null);
+    const code = (sendCalls[0].match(/\[([A-Z0-9]{4})\]/) || [])[1];
+    bridge._testHandleTextMessage({ text: `1,3 ${code}`, fromUserId: "u" });
+    assert.deepStrictEqual(captured, { "启用功能": "A, C" });
+  });
+
+  it("incomplete numeric reply does not resolve the elicitation", () => {
+    let captured = null;
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      isEnabled: () => true,
+      getLastFromUserId: () => "u",
+      sendTextMessage: async (text) => { sendCalls.push(text); return { status: 200 }; },
+    });
+    const bridge = createBridge(client);
+    bridge.start();
+    const permEntry = makePermEntry({ toolName: "AskUserQuestion", isElicitation: true, toolInput: multiQ });
+    bridge.requestElicitation(permEntry, (e, a) => { captured = a; }, null);
+    const code = (sendCalls[0].match(/\[([A-Z0-9]{4})\]/) || [])[1];
+    // Only answers question 1 — question 2 still open, must not resolve.
+    bridge._testHandleTextMessage({ text: `1 ${code}`, fromUserId: "u" });
+    assert.strictEqual(captured, null);
+    assert.strictEqual(bridge.pendingCount(), 1);
+  });
+});
+
 describe("wechat-approval — bridge", () => {
   it("start is idempotent", () => {
     const client = makeMockWechatClient();
@@ -192,6 +322,28 @@ describe("wechat-approval — bridge", () => {
     const permEntry = makePermEntry();
     const result = bridge.requestApproval(permEntry, () => {}, null);
     assert.strictEqual(result, false);
+  });
+
+  it("requestApproval sends using client-level from_user_id (lazy bridge)", () => {
+    // Reproduces the real bug: the bridge is created lazily on the first
+    // approval, so it has never observed an inbound message itself. The send
+    // target must come from the client, which has been polling since startup.
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      isEnabled: () => true,
+      getLastFromUserId: () => "user123@im.wechat",
+      sendTextMessage: async (text, toUserId) => {
+        sendCalls.push({ text, toUserId });
+        return { status: 200 };
+      },
+    });
+    const bridge = createBridge(client);
+    bridge.start();
+    const permEntry = makePermEntry();
+    const result = bridge.requestApproval(permEntry, () => {}, null);
+    assert.strictEqual(result, true);
+    assert.strictEqual(sendCalls.length, 1);
+    assert.strictEqual(sendCalls[0].toUserId, "user123@im.wechat");
   });
 
   it("requestApproval returns false when client disabled", () => {

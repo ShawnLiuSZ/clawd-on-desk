@@ -8,7 +8,39 @@ const {
   generateWechatUin,
   generateClientId,
   createWechatIlinkClient,
+  isGetUpdatesError,
 } = require("../src/wechat-ilink-client");
+
+describe("wechat-ilink-client — isGetUpdatesError", () => {
+  it("treats a successful body (no ret field) as NOT an error", () => {
+    // Real ilink success shape — has no `ret` field at all. Flagging this as
+    // an error breaks polling so the bot never receives any message.
+    assert.strictEqual(isGetUpdatesError({
+      msgs: [],
+      sync_buf: "CAMY...",
+      get_updates_buf: "CgkIAxi...",
+    }), false);
+  });
+
+  it("treats a body with msgs as NOT an error", () => {
+    assert.strictEqual(isGetUpdatesError({
+      msgs: [{ message_type: 1, message_state: 2 }],
+      get_updates_buf: "x",
+    }), false);
+  });
+
+  it("flags a non-zero numeric ret as an error", () => {
+    assert.strictEqual(isGetUpdatesError({ ret: -1, errmsg: "bad" }), true);
+  });
+
+  it("flags a non-zero errcode as an error", () => {
+    assert.strictEqual(isGetUpdatesError({ errcode: -14, errmsg: "expired" }), true);
+  });
+
+  it("treats ret:0 as NOT an error", () => {
+    assert.strictEqual(isGetUpdatesError({ ret: 0, msgs: [] }), false);
+  });
+});
 
 describe("wechat-ilink-client", () => {
   describe("generateWechatUin", () => {
@@ -172,6 +204,39 @@ describe("wechat-ilink-client", () => {
           item_list: [{ type: 1, text_item: { text: "partial" } }],
         });
         assert.strictEqual(textReceived, null);
+      });
+
+      it("captures from_user_id at client level for replies", () => {
+        const client = makeClient();
+        assert.strictEqual(client.getLastFromUserId(), "");
+        client._testProcessMessage({
+          message_type: 1,
+          message_state: 2,
+          from_user_id: "user123@im.wechat",
+          to_user_id: "bot456@im.bot",
+          context_token: "ctx-token-1",
+          item_list: [{ type: 1, text_item: { text: "hello" } }],
+        });
+        // Target must survive even with no bridge listener subscribed —
+        // this is what lets the first approval find a send target.
+        assert.strictEqual(client.getLastFromUserId(), "user123@im.wechat");
+      });
+
+      it("does not overwrite from_user_id with bot's own messages", () => {
+        const client = makeClient();
+        client._testProcessMessage({
+          message_type: 1,
+          message_state: 2,
+          from_user_id: "user123@im.wechat",
+          item_list: [{ type: 1, text_item: { text: "hi" } }],
+        });
+        client._testProcessMessage({
+          message_type: 2,
+          message_state: 2,
+          from_user_id: "bot456@im.bot",
+          item_list: [{ type: 1, text_item: { text: "bot reply" } }],
+        });
+        assert.strictEqual(client.getLastFromUserId(), "user123@im.wechat");
       });
     });
   });

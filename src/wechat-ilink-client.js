@@ -36,6 +36,17 @@ function compactLog(text, maxLen = 200) {
   return t;
 }
 
+// Classify a getupdates response body. The ilink API omits `ret` on success
+// (the body is just { msgs, sync_buf, get_updates_buf }); it only sets a
+// non-zero numeric `ret` and/or `errcode` on failure. So an error is present
+// only when one of those signals is explicitly non-zero.
+function isGetUpdatesError(rb) {
+  if (!rb || typeof rb !== "object") return false;
+  if (typeof rb.ret === "number" && rb.ret !== 0) return true;
+  if (typeof rb.errcode === "number" && rb.errcode !== 0) return true;
+  return false;
+}
+
 function generateWechatUin() {
   const uin = String(Math.floor(Math.random() * 4294967296));
   return Buffer.from(uin).toString("base64");
@@ -156,6 +167,7 @@ function createWechatIlinkClient(config, options = {}) {
   let getUpdatesBuf = "";
   let contextToken = "";
   let botUserId = "";
+  let lastFromUserId = "";
   let longPollAbortController = null;
   let reconnectTimer = null;
   let reconnectAttempts = 0;
@@ -252,7 +264,11 @@ function createWechatIlinkClient(config, options = {}) {
         }
 
         const rb = result.body;
-        if (rb && rb.ret !== 0) {
+        // A successful getupdates response carries { msgs, sync_buf,
+        // get_updates_buf } and NO `ret` field. Errors carry a non-zero
+        // numeric `ret` (and/or `errcode`). Treating a missing `ret` as an
+        // error would flag every successful poll and never receive messages.
+        if (rb && isGetUpdatesError(rb)) {
           logFn(`wechat-ilink: getupdates ret=${rb.ret} errcode=${rb.errcode || ""} errmsg=${compactLog(rb.errmsg || "", 100)}`);
           // errcode -14 = session expired, need re-login
           if (rb.errcode === -14) {
@@ -322,6 +338,12 @@ function createWechatIlinkClient(config, options = {}) {
     }
     const text = textParts.join("").trim();
     const fromUserId = msg.from_user_id || "";
+
+    // Capture the inbound sender at client level so approval sends always have
+    // a target — independent of when the approval bridge subscribes its
+    // listener. Bot's own messages (message_type 2) returned above, so this
+    // only ever records a real user. Mirrors QQ's client-level openid capture.
+    if (fromUserId) lastFromUserId = fromUserId;
 
     // Notify general message listeners
     for (const listener of messageListeners) {
@@ -394,7 +416,7 @@ function createWechatIlinkClient(config, options = {}) {
   }
 
   function getLastFromUserId() {
-    return "";
+    return lastFromUserId;
   }
 
   function onMessage(callback) {
@@ -431,6 +453,7 @@ function createWechatIlinkClient(config, options = {}) {
     sendTextMessage,
     getContextToken,
     getBotUserId,
+    getLastFromUserId,
     onMessage,
     onTextMessage,
     disconnect,
@@ -446,6 +469,7 @@ module.exports = {
   compactLog,
   DEFAULT_BASE_URL,
   DEFAULT_LONGPOLL_TIMEOUT_MS,
+  isGetUpdatesError,
   generateWechatUin,
   generateClientId,
   createWechatIlinkClient,

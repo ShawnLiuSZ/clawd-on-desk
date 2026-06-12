@@ -260,8 +260,21 @@ function startRemoteApproval(ctx, permEntry) {
 
 function startRemoteWechatApproval(ctx, permEntry) {
   if (permEntry && permEntry.toolName === "ExitPlanMode") return;
-  // WeChat is text-only — no elicitation card support.
-  if (permEntry && permEntry.isElicitation) return;
+
+  // WeChat has no interactive cards, so elicitation (single/multi-select) is
+  // rendered as a numbered text prompt the user answers by replying with the
+  // option number(s).
+  if (permEntry && permEntry.isElicitation) {
+    if (typeof ctx.maybeStartRemoteWechatElicitation === "function") {
+      try {
+        ctx.maybeStartRemoteWechatElicitation(permEntry);
+      } catch (err) {
+        ctx.permLog(`wechat remote elicitation start failed: ${err && err.message ? err.message : err}`);
+      }
+    }
+    return;
+  }
+
   if (typeof ctx.maybeStartRemoteWechatApproval !== "function") return;
   try {
     ctx.maybeStartRemoteWechatApproval(permEntry);
