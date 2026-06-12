@@ -461,4 +461,52 @@ describe("qq-approval: requestElicitation", () => {
     bridge._testHandleInteraction({ permId, behavior: "elicitation:0:0" });
     assert.deepStrictEqual(bridge._testGetFirstEntry().selections[0], [2], "re-tap removes");
   });
+
+  it("multi-select: submit joins selected labels with ', ' and resolves", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+    const perm = makePermEntry({
+      toolInput: { questions: [
+        { question: "选环境?", multiSelect: true, options: [
+          { label: "测试" }, { label: "预发" }, { label: "生产" },
+        ]},
+      ]},
+    });
+    bridge.requestElicitation(perm, (_, answers) => { resolvedAnswers = answers; }, {});
+    const permId = bridge._testGetFirstPermId();
+
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:0" }); // 测试
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:2" }); // 生产
+    bridge._testHandleInteraction({ permId, behavior: "elicitation-submit" });
+
+    assert.ok(resolvedAnswers);
+    assert.strictEqual(resolvedAnswers["选环境?"], "测试, 生产");
+    assert.strictEqual(bridge.hasPending(), false);
+  });
+
+  it("multi-select: submit with an unanswered question does not resolve", () => {
+    let sendCalls = 0;
+    const client = makeMockQQBotClient({
+      sendCardMessage: async () => { sendCalls++; return { status: 200 }; },
+    });
+    const bridge = createBridge(client);
+    let resolved = false;
+    const perm = makePermEntry({
+      toolInput: { questions: [
+        { question: "Q1?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
+        { question: "Q2?", multiSelect: true, options: [{ label: "X" }, { label: "Y" }] },
+      ]},
+    });
+    bridge.requestElicitation(perm, () => { resolved = true; }, {});
+    const permId = bridge._testGetFirstPermId();
+    const before = sendCalls;
+
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:0" }); // 只答 Q1
+    bridge._testHandleInteraction({ permId, behavior: "elicitation-submit" });
+
+    assert.strictEqual(resolved, false, "incomplete submit must not resolve");
+    assert.strictEqual(bridge.hasPending(), true, "still pending");
+    assert.ok(sendCalls > before + 1, "warning card re-sent on incomplete submit");
+  });
 });

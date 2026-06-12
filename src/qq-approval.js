@@ -187,6 +187,41 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     resendElicitationCard(entry, false);
   }
 
+  function handleElicitationSubmit(entry) {
+    const answers = buildMultiSelectAnswers(entry);
+    if (!answers) {
+      resendElicitationCard(entry, true); // 有题未选 → 重发带警告的卡片
+      resetElicitationTimer(entry);
+      return;
+    }
+    logFn(`qq-approval: elicitation submitted permId=${entry._permId} answers=${JSON.stringify(answers)}`);
+    resolveElicitationPending(entry, answers);
+  }
+
+  // Build the answers map QQ submits. Each question's selected option labels are
+  // joined with ", " — matching the desktop renderer's getElicitationAnswerText.
+  // Returns null if any question has no selection (blocks submit).
+  function buildMultiSelectAnswers(entry) {
+    const toolInput = entry.permEntry && entry.permEntry.toolInput;
+    const questions = (toolInput && Array.isArray(toolInput.questions)) ? toolInput.questions : [];
+    const selections = Array.isArray(entry.selections) ? entry.selections : [];
+    const answers = {};
+    for (let qi = 0; qi < questions.length; qi++) {
+      const q = questions[qi];
+      if (!q || typeof q.question !== "string" || !q.question) continue;
+      const options = Array.isArray(q.options) ? q.options : [];
+      const sel = Array.isArray(selections[qi]) ? selections[qi] : [];
+      const labels = [];
+      for (const oi of sel) {
+        const opt = options[oi];
+        if (opt && opt.label) labels.push(opt.label);
+      }
+      if (labels.length === 0) return null;
+      answers[q.question] = labels.join(", ");
+    }
+    return answers;
+  }
+
   function resendElicitationCard(entry, warn) {
     if (!qqBotClient || typeof qqBotClient.sendCardMessage !== "function") return;
     const card = qqBotClient.buildElicitationCard(
