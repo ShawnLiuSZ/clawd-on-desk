@@ -100,9 +100,129 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
 
   function handleInteraction(event) {
     if (!event || !event.permId) return;
-    if (!pendingApprovals.has(event.permId)) return;
+    const entry = pendingApprovals.get(event.permId);
+    if (!entry) return;
+
+    // Elicitation button clicks encode "elicitation:<qi>:<oi>" in behavior.
+    if (entry.isElicitation && event.behavior) {
+      if (entry.isElicitationMulti) {
+        if (event.behavior === "elicitation-submit") {
+          handleElicitationSubmit(entry);
+          return;
+        }
+        if (event.behavior.startsWith("elicitation:")) {
+          handleElicitationToggle(entry, event.behavior);
+          return;
+        }
+      } else if (event.behavior.startsWith("elicitation:")) {
+        handleElicitationClick(entry, event.behavior);
+        return;
+      }
+    }
+
     logFn(`qq-approval: resolved permId=${event.permId} behavior=${normalizeBehavior(event.behavior)}`);
     resolvePending(event.permId, event.behavior);
+  }
+
+  // Parse an elicitation button click and resolve the entry. For single-question
+  // forms this resolves immediately with the selected answer. For multi-question
+  // forms, remaining unanswered questions get a "Defer to agent" fallback so the
+  // permission resolves rather than hanging.
+  function handleElicitationClick(entry, behavior) {
+    const parts = behavior.split(":");
+    const qi = parseInt(parts[1], 10);
+    const oi = parseInt(parts[2], 10);
+
+    const toolInput = entry.permEntry && entry.permEntry.toolInput;
+    const questions = (toolInput && Array.isArray(toolInput.questions)) ? toolInput.questions : [];
+    const answers = {};
+
+    // Build answers for ALL questions, using the selected option for the
+    // clicked question and "Defer to agent" for the rest.
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      if (!q || typeof q.question !== "string" || !q.question) continue;
+      if (i === qi) {
+        const options = Array.isArray(q.options) ? q.options : [];
+        const opt = options[oi];
+        answers[q.question] = (opt && opt.label) ? opt.label : `Option ${oi + 1}`;
+      } else {
+        // Multi-question: fill unanswered with a neutral fallback so the
+        // agent receives a complete answer map and doesn't hang.
+        answers[q.question] = "Defer to agent";
+      }
+    }
+
+    logFn(`qq-approval: elicitation resolved permId=${entry._permId || "?"} answers=${JSON.stringify(answers)}`);
+    resolveElicitationPending(entry, answers);
+  }
+
+  // Multi-select toggle: flip an option (multiSelect) or replace the question's
+  // selection (single-select within a multi card = radio), then re-send the card
+  // since QQ can't edit a sent message.
+  function handleElicitationToggle(entry, behavior) {
+    const parts = behavior.split(":");
+    const qi = parseInt(parts[1], 10);
+    const oi = parseInt(parts[2], 10);
+    if (!Number.isInteger(qi) || !Number.isInteger(oi)) return;
+
+    const toolInput = entry.permEntry && entry.permEntry.toolInput;
+    const questions = (toolInput && Array.isArray(toolInput.questions)) ? toolInput.questions : [];
+    const q = questions[qi];
+    if (!q) return;
+
+    if (!Array.isArray(entry.selections)) entry.selections = questions.map(() => []);
+    if (!Array.isArray(entry.selections[qi])) entry.selections[qi] = [];
+    const cur = entry.selections[qi];
+
+    if (q.multiSelect) {
+      const pos = cur.indexOf(oi);
+      if (pos === -1) cur.push(oi);
+      else cur.splice(pos, 1);
+    } else {
+      entry.selections[qi] = [oi]; // single-select within a multi card = radio
+    }
+
+    resetElicitationTimer(entry);
+    resendElicitationCard(entry, false);
+  }
+
+  function resendElicitationCard(entry, warn) {
+    if (!qqBotClient || typeof qqBotClient.sendCardMessage !== "function") return;
+    const card = qqBotClient.buildElicitationCard(
+      entry.permEntry.toolInput,
+      entry._permId,
+      entry.shortCode,
+      entry.selections,
+      warn
+    );
+    qqBotClient.sendCardMessage(card).catch((err) => {
+      logFn(`qq-approval: elicitation re-send failed: ${err && err.message}`);
+    });
+  }
+
+  function resetElicitationTimer(entry) {
+    if (entry.timer) clearTimeout(entry.timer);
+    const permId = entry._permId;
+    entry.timer = setTimeout(() => {
+      pendingApprovals.delete(permId);
+      if (entry.shortCode) shortCodeToPermId.delete(entry.shortCode);
+      logFn(`qq-approval: elicitation timed out permId=${permId}`);
+    }, entry.timeoutMs || DEFAULT_APPROVAL_TIMEOUT_MS);
+  }
+
+  function resolveElicitationPending(entry, answers) {
+    const permId = entry._permId;
+    if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
+    pendingApprovals.delete(permId);
+    if (entry.shortCode) shortCodeToPermId.delete(entry.shortCode);
+
+    const permEntry = entry.permEntry;
+    const resolveFn = entry.resolveFn;
+    if (!permEntry || !resolveFn) return;
+
+    sendConfirmation(permEntry, "allow");
+    resolveFn(permEntry, answers);
   }
 
   function normalizeBehavior(raw) {
@@ -134,6 +254,7 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
       permEntry,
       resolveFn,
       shortCode,
+      _permId: permId,
       timer: setTimeout(() => {
         pendingApprovals.delete(permId);
         shortCodeToPermId.delete(shortCode);
@@ -158,6 +279,58 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
         shortCodeToPermId.delete(shortCode);
       }
     });
+    return true;
+  }
+
+  function requestElicitation(permEntry, resolveFn, config) {
+    if (!qqBotClient || typeof qqBotClient.buildElicitationCard !== "function") return false;
+    if (!qqBotClient.isEnabled()) return false;
+    if (typeof qqBotClient.sendCardMessage !== "function") return false;
+
+    const permId = generatePermId();
+    let shortCode = generateShortCode();
+    while (shortCodeToPermId.has(shortCode)) shortCode = generateShortCode();
+
+    const timeoutMs = (config && Number.isFinite(config.approvalTimeoutMs))
+      ? config.approvalTimeoutMs
+      : DEFAULT_APPROVAL_TIMEOUT_MS;
+
+    const questions = (permEntry.toolInput && Array.isArray(permEntry.toolInput.questions))
+      ? permEntry.toolInput.questions : [];
+    const isMulti = questions.some((q) => q && q.multiSelect);
+    const selections = isMulti ? questions.map(() => []) : null;
+
+    const card = qqBotClient.buildElicitationCard(
+      permEntry.toolInput,
+      permId,
+      shortCode,
+      selections
+    );
+
+    pendingApprovals.set(permId, {
+      permEntry,
+      resolveFn,
+      shortCode,
+      _permId: permId,
+      isElicitation: true,
+      isElicitationMulti: isMulti,
+      selections,
+      timeoutMs,
+      timer: setTimeout(() => {
+        pendingApprovals.delete(permId);
+        shortCodeToPermId.delete(shortCode);
+        logFn(`qq-approval: elicitation timed out permId=${permId}`);
+      }, timeoutMs),
+      createdAt: nowFn(),
+    });
+    shortCodeToPermId.set(shortCode, permId);
+
+    qqBotClient.sendCardMessage(card).catch((err) => {
+      logFn(`qq-approval: elicitation card send failed: ${err && err.message}`);
+      pendingApprovals.delete(permId);
+      shortCodeToPermId.delete(shortCode);
+    });
+
     return true;
   }
 
@@ -219,6 +392,7 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     start,
     stop,
     requestApproval,
+    requestElicitation,
     cancelApproval,
     hasPending,
     pendingCount,
@@ -226,6 +400,10 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     _testHandleTextReply: handleTextReply,
     _testGetFirstPermId: () => {
       for (const [key] of pendingApprovals) return key;
+      return null;
+    },
+    _testGetFirstEntry: () => {
+      for (const [, entry] of pendingApprovals) return entry;
       return null;
     },
   };

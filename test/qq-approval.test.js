@@ -28,11 +28,17 @@ function makeMockQQBotClient(overrides = {}) {
       elements: [],
       _permId: permId,
     }),
+    buildElicitationCard: (toolInput, permId) => ({
+      markdown: { content: "💬 AskUserQuestion" },
+      keyboard: { content: { rows: [] } },
+      _permId: permId,
+    }),
     buildConfirmationCard: (toolName, decision, permId) => ({
       header: { title: { tag: "plain_text", content: decision } },
       elements: [],
     }),
     onInteraction: () => () => {},
+    onMessage: () => () => {},
     ...overrides,
   };
 }
@@ -273,5 +279,186 @@ describe("qq-approval: start subscribes listeners", () => {
     const bridge = createBridge(client);
     bridge.start();
     assert.strictEqual(subscribed, true);
+  });
+});
+
+describe("qq-approval: requestElicitation", () => {
+  it("returns false when client is not enabled", () => {
+    const client = makeMockQQBotClient({ isEnabled: () => false });
+    const bridge = createBridge(client);
+    const result = bridge.requestElicitation(makePermEntry(), () => {}, {});
+    assert.strictEqual(result, false);
+  });
+
+  it("returns false when client lacks buildElicitationCard", () => {
+    const client = makeMockQQBotClient({ buildElicitationCard: null });
+    const bridge = createBridge(client);
+    const result = bridge.requestElicitation(makePermEntry(), () => {}, {});
+    assert.strictEqual(result, false);
+  });
+
+  it("sends card and tracks pending", () => {
+    let sendCalls = 0;
+    const client = makeMockQQBotClient({
+      sendCardMessage: async () => { sendCalls++; return { status: 200 }; },
+    });
+    const bridge = createBridge(client);
+    assert.strictEqual(bridge.hasPending(), false);
+    const result = bridge.requestElicitation(makePermEntry(), () => {}, { approvalTimeoutMs: 10000 });
+    assert.strictEqual(result, true);
+    assert.strictEqual(bridge.hasPending(), true);
+    assert.strictEqual(bridge.pendingCount(), 1);
+    assert.strictEqual(sendCalls, 1);
+  });
+
+  it("resolves single-question elicitation via button click", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+
+    const perm = makePermEntry({
+      toolInput: {
+        questions: [
+          { question: "How to proceed?", header: "Approach", options: [
+            { label: "Fast path" }, { label: "Safe path" }
+          ]}
+        ]
+      }
+    });
+
+    bridge.requestElicitation(perm, (entry, answers) => {
+      resolvedAnswers = answers;
+    }, {});
+
+    assert.strictEqual(bridge.hasPending(), true);
+
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "elicitation:0:1", // picked "Safe path"
+    });
+
+    assert.ok(resolvedAnswers);
+    assert.strictEqual(resolvedAnswers["How to proceed?"], "Safe path");
+    assert.strictEqual(bridge.hasPending(), false);
+  });
+
+  it("fills unanswered multi-question with 'Defer to agent'", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+
+    const perm = makePermEntry({
+      toolInput: {
+        questions: [
+          { question: "Q1?", options: [{ label: "A" }, { label: "B" }] },
+          { question: "Q2?", options: [{ label: "X" }, { label: "Y" }] },
+        ]
+      }
+    });
+
+    bridge.requestElicitation(perm, (entry, answers) => {
+      resolvedAnswers = answers;
+    }, {});
+
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "elicitation:0:0", // picked "A" for Q1
+    });
+
+    assert.ok(resolvedAnswers);
+    assert.strictEqual(resolvedAnswers["Q1?"], "A");
+    assert.strictEqual(resolvedAnswers["Q2?"], "Defer to agent");
+    assert.strictEqual(bridge.hasPending(), false);
+  });
+
+  it("falls back to 'Option N' when selected option has no label", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+
+    const perm = makePermEntry({
+      toolInput: {
+        questions: [
+          { question: "Q1?", options: [{}, { label: "" }] },
+        ]
+      }
+    });
+
+    bridge.requestElicitation(perm, (entry, answers) => {
+      resolvedAnswers = answers;
+    }, {});
+
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "elicitation:0:0",
+    });
+
+    assert.ok(resolvedAnswers);
+    assert.strictEqual(resolvedAnswers["Q1?"], "Option 1");
+  });
+
+  it("ignores elicitation clicks for non-elicitation entries", () => {
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedBehavior = null;
+
+    bridge.requestApproval(makePermEntry(), (_, b) => { resolvedBehavior = b; }, {});
+
+    // Send an elicitation click to a regular approval entry
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "elicitation:0:1",
+    });
+
+    // Behavior should be normalized to "deny" (not elicitation-resolved)
+    assert.strictEqual(resolvedBehavior, "deny");
+    assert.strictEqual(bridge.hasPending(), false);
+  });
+
+  it("handles timeout for elicitation entries", async () => {
+    const client = makeMockQQBotClient();
+    let now = 1000;
+    const bridge = createBridge(client, { now: () => now });
+    bridge.requestElicitation(makePermEntry({
+      toolInput: { questions: [{ question: "Q?", options: [{ label: "A" }] }] }
+    }), () => {}, { approvalTimeoutMs: 100 });
+    assert.strictEqual(bridge.pendingCount(), 1);
+    now += 200;
+    await new Promise((r) => setTimeout(r, 50));
+    bridge._testHandleInteraction({
+      permId: bridge._testGetFirstPermId(),
+      behavior: "elicitation:0:0",
+    });
+    assert.strictEqual(bridge.pendingCount(), 0);
+  });
+
+  it("multi-select: toggling accumulates selections and re-sends the card", () => {
+    let sendCalls = 0;
+    const client = makeMockQQBotClient({
+      sendCardMessage: async () => { sendCalls++; return { status: 200 }; },
+    });
+    const bridge = createBridge(client);
+    const perm = makePermEntry({
+      toolInput: { questions: [
+        { question: "选环境?", multiSelect: true, options: [
+          { label: "测试" }, { label: "预发" }, { label: "生产" },
+        ]},
+      ]},
+    });
+    bridge.requestElicitation(perm, () => {}, {});
+    assert.strictEqual(sendCalls, 1, "initial card sent");
+
+    const permId = bridge._testGetFirstPermId();
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:0" }); // 选「测试」
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:2" }); // 选「生产」
+
+    const entry = bridge._testGetFirstEntry();
+    assert.deepStrictEqual(entry.selections[0], [0, 2], "both options accumulated");
+    assert.strictEqual(sendCalls, 3, "card re-sent on each toggle");
+    assert.strictEqual(bridge.hasPending(), true, "toggling does not resolve");
+
+    // 再点「测试」→ 取消
+    bridge._testHandleInteraction({ permId, behavior: "elicitation:0:0" });
+    assert.deepStrictEqual(bridge._testGetFirstEntry().selections[0], [2], "re-tap removes");
   });
 });
