@@ -582,12 +582,14 @@ function createQQBotClient(config, options = {}) {
 
   function handleC2CMessage(eventData) {
     const discoveredOpenid = extractOpenidFromEvent(eventData);
-    if (discoveredOpenid && discoveredOpenid !== userOpenid) {
+    if (discoveredOpenid && !userOpenid) {
       userOpenid = discoveredOpenid;
-      logFn(`qq-bot: auto-discovered userOpenid from C2C message — ${discoveredOpenid.slice(0, 12)}…`);
+      logFn(`qq-bot: paired userOpenid from C2C message — ${discoveredOpenid.slice(0, 12)}…`);
       for (const listener of openidChangeListeners) {
         try { listener(discoveredOpenid); } catch (err) { logFn(`qq-bot: openid listener error: ${compactLog(err, 100)}`); }
       }
+    } else if (discoveredOpenid && discoveredOpenid !== userOpenid) {
+      logFn(`qq-bot: ignored openid from non-authorized sender — ${discoveredOpenid.slice(0, 12)}… (anchor already set)`);
     } else if (!discoveredOpenid) {
       logFn(`qq-bot: C2C message received but could not extract openid — raw event keys: ${Object.keys(eventData || {}).join(",")}`);
     }
@@ -773,12 +775,14 @@ function createQQBotClient(config, options = {}) {
         // resilient to bot platform renames of event types.
         if (msg.d && (eventType.includes("MESSAGE") || eventType.includes("DIRECT"))) {
           const candidate = extractOpenidFromEvent(msg.d);
-          if (candidate && candidate !== userOpenid) {
-            logFn(`qq-bot: openid extracted from ${eventType} — ${candidate.slice(0, 12)}…`);
+          if (candidate && !userOpenid) {
+            logFn(`qq-bot: paired openid from ${eventType} — ${candidate.slice(0, 12)}…`);
             userOpenid = candidate;
             for (const listener of openidChangeListeners) {
               try { listener(candidate); } catch (err) { logFn(`qq-bot: openid listener error: ${compactLog(err, 100)}`); }
             }
+          } else if (candidate && candidate !== userOpenid) {
+            logFn(`qq-bot: ignored openid from non-authorized ${eventType} sender — ${candidate.slice(0, 12)}…`);
           }
           return;
         }

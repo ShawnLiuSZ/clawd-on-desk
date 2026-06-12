@@ -594,6 +594,38 @@ describe("qq-bot-client: DEFAULT_INTENTS", () => {
   });
 });
 
+describe("qq-bot-client: anchor pinning", () => {
+  it("adopts the first discovered openid when none is configured", () => {
+    const client = createQQBotClient({ appId: "12345678", appSecret: "s", userOpenid: "" }, { log: () => {} });
+    client._testHandleC2CMessage({ author: { user_openid: "first-user" }, content: "hi" });
+    assert.strictEqual(client.getDiscoveredOpenid(), "first-user");
+  });
+
+  it("does NOT overwrite a configured anchor with a different sender", () => {
+    const client = createQQBotClient({ appId: "12345678", appSecret: "s", userOpenid: "owner" }, { log: () => {} });
+    client._testHandleC2CMessage({ author: { user_openid: "attacker" }, content: "y" });
+    assert.strictEqual(client.getDiscoveredOpenid(), "owner");
+  });
+
+  it("does NOT fire openid-discovered listeners for a non-authorized sender", () => {
+    const client = createQQBotClient({ appId: "12345678", appSecret: "s", userOpenid: "owner" }, { log: () => {} });
+    let fired = [];
+    client.onOpenidDiscovered((o) => fired.push(o));
+    fired = []; // reset after initial replay (onOpenidDiscovered fires immediately for existing value)
+    client._testHandleC2CMessage({ author: { user_openid: "attacker" }, content: "y" });
+    assert.deepStrictEqual(fired, []);
+  });
+
+  it("still surfaces the inbound message + its real sender openid to message listeners", () => {
+    const client = createQQBotClient({ appId: "12345678", appSecret: "s", userOpenid: "owner" }, { log: () => {} });
+    let seen = null;
+    client.onMessage((m) => { seen = m; });
+    client._testHandleC2CMessage({ author: { user_openid: "attacker" }, content: "y" });
+    assert.strictEqual(seen.text, "y");
+    assert.strictEqual(seen.userOpenid, "attacker");
+  });
+});
+
 describe("qq-bot-client: message listener (text-reply fallback)", () => {
   it("fires onMessage with text + openid for C2C messages", () => {
     const client = createQQBotClient(makeConfig({ userOpenid: "" }), { httpPost: makeMockHttpPost() });
