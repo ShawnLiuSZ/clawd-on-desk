@@ -444,7 +444,7 @@ function createQQBotClient(config, options = {}) {
   // `selections` is an array indexed by question → array of selected option indices.
   function buildMultiSelectElicitationCard(questions, permId, shortCode, selections, warn) {
     const sel = Array.isArray(selections) ? selections : [];
-    const lines = ["💬 **AskUserQuestion**"];
+    const lines = [`💬 **AskUserQuestion**${shortCode ? ` [${mdSafe(shortCode)}]` : ""}`];
     const optionButtons = [];
     let buttonId = 1;
     let totalSelected = 0;

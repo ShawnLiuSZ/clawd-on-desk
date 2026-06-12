@@ -418,6 +418,15 @@ describe("qq-bot-client: buildElicitationCard", () => {
     assert.ok(buttons.some((b) => b.action.data === "qq_p|elicitation:0:0"));
   });
 
+  it("multi-select: shows the short code so confirmations can be matched", () => {
+    const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+    const toolInput = { questions: [
+      { question: "选?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
+    ]};
+    const card = client.buildElicitationCard(toolInput, "qq_p", "EC8A", [[]]);
+    assert.ok(card.markdown.content.includes("EC8A"), "multi-select card displays the short code");
+  });
+
   it("non-multi elicitation keeps the immediate-select card (no submit button)", () => {
     const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
     const toolInput = { questions: [
