@@ -6,25 +6,22 @@
 // Throttled by minIntervalMs to avoid spam.
 // Respects DND mode and per-agent enabled flags.
 
-const { larkCardText } = require("./lark-bot-i18n");
-
 const STATE_LABELS = {
-  idle: "stateIdle",
-  working: "stateWorking",
-  thinking: "stateThinking",
-  attention: "stateAttention",
-  error: "stateError",
-  notification: "stateNotification",
-  sleeping: "stateSleeping",
-  sweeping: "stateSweeping",
-  juggling: "stateJuggling",
-  carrying: "stateCarrying",
+  idle: "💤 Idle",
+  working: "⚙️ Working",
+  thinking: "🤔 Thinking",
+  attention: "🔔 Attention",
+  error: "❌ Error",
+  notification: "📢 Notification",
+  sleeping: "😴 Sleeping",
+  sweeping: "🧹 Sweeping",
+  juggling: "🤹 Juggling",
+  carrying: "📦 Carrying",
 };
 
 function createLarkNotifier(larkBotClient, options = {}) {
   const logFn = typeof options.log === "function" ? options.log : () => {};
   const nowFn = typeof options.now === "function" ? options.now : () => Date.now();
-  const getLang = typeof options.getLang === "function" ? options.getLang : () => "en";
 
   const lastNotified = new Map();
 
@@ -41,9 +38,7 @@ function createLarkNotifier(larkBotClient, options = {}) {
   }
 
   function formatStateMessage(agentName, state, sessionId) {
-    const lang = getLang();
-    const stateKey = STATE_LABELS[state] || state;
-    const label = larkCardText(lang, stateKey) || state;
+    const label = STATE_LABELS[state] || state;
     const sessionIdShort = sessionId ? String(sessionId).slice(-4) : "";
     const parts = [`[${agentName}] ${label}`];
     if (sessionIdShort) parts.push(`Session: ${sessionIdShort}`);
