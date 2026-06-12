@@ -260,6 +260,20 @@ function startRemoteApproval(ctx, permEntry) {
 
 function startRemoteQQApproval(ctx, permEntry) {
   if (permEntry && permEntry.toolName === "ExitPlanMode") return;
+
+  // Elicitation (AskUserQuestion) requests use a separate QQ card with
+  // option buttons rather than Allow/Deny.
+  if (permEntry && permEntry.isElicitation) {
+    if (typeof ctx.maybeStartRemoteQQElicitation === "function") {
+      try {
+        ctx.maybeStartRemoteQQElicitation(permEntry);
+      } catch (err) {
+        ctx.permLog(`qq remote elicitation start failed: ${err && err.message ? err.message : err}`);
+      }
+    }
+    return;
+  }
+
   if (typeof ctx.maybeStartRemoteQQApproval !== "function") return;
   try {
     ctx.maybeStartRemoteQQApproval(permEntry);

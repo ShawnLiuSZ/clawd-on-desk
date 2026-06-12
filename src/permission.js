@@ -1149,6 +1149,31 @@ function maybeStartRemoteQQApproval(permEntry) {
   return true;
 }
 
+function maybeStartRemoteQQElicitation(permEntry) {
+  if (!permEntry || !permEntry.isElicitation) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const bridge = getQQApprovalBridge();
+  if (!bridge || typeof bridge.requestElicitation !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
+    ? ctx.getQQBotConfig()
+    : (ctx.qqBotConfig || null);
+  const resolveFn = (entry, answers) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, answers);
+    resolvePermissionEntry(entry, "allow");
+  };
+  try {
+    bridge.requestElicitation(permEntry, resolveFn, qqConfig);
+  } catch (err) {
+    permLog(`qq remote elicitation failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
 function applyPermissionSuggestion(perm, index, options = {}) {
   const suggestion = perm && Array.isArray(perm.suggestions) ? perm.suggestions[index] : null;
   if (!suggestion) return false;
@@ -1936,6 +1961,7 @@ return {
   addPendingPermission, removePendingPermission,
   maybeStartRemoteApproval,
   maybeStartRemoteQQApproval,
+  maybeStartRemoteQQElicitation,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,
