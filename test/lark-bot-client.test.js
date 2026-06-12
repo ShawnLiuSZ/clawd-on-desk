@@ -2,7 +2,13 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
-const { createLarkBotClient, compactLog } = require("../src/lark-bot-client");
+const {
+  createLarkBotClient,
+  compactLog,
+  REGION_FEISHU,
+  REGION_LARK,
+  getEndpoints,
+} = require("../src/lark-bot-client");
 
 describe("lark-bot-client: compactLog", () => {
   it("truncates long messages", () => {
@@ -22,6 +28,26 @@ describe("lark-bot-client: compactLog", () => {
   });
 });
 
+describe("lark-bot-client: getEndpoints", () => {
+  it("returns Feishu endpoints for feishu region", () => {
+    const endpoints = getEndpoints(REGION_FEISHU);
+    assert.ok(endpoints.tokenUrl.includes("open.feishu.cn"));
+    assert.ok(endpoints.apiBase.includes("open.feishu.cn"));
+  });
+
+  it("returns Lark endpoints for lark region", () => {
+    const endpoints = getEndpoints(REGION_LARK);
+    assert.ok(endpoints.tokenUrl.includes("open.larksuite.com"));
+    assert.ok(endpoints.apiBase.includes("open.larksuite.com"));
+  });
+
+  it("defaults to Feishu for unknown region", () => {
+    const endpoints = getEndpoints("unknown");
+    assert.ok(endpoints.tokenUrl.includes("open.feishu.cn"));
+    assert.ok(endpoints.apiBase.includes("open.feishu.cn"));
+  });
+});
+
 describe("lark-bot-client: createLarkBotClient", () => {
   it("creates client with config", () => {
     const client = createLarkBotClient({
@@ -32,6 +58,19 @@ describe("lark-bot-client: createLarkBotClient", () => {
     assert.ok(client);
     assert.strictEqual(client.isEnabled(), true);
     assert.strictEqual(client.getChatId(), "oc_xxxxx");
+    assert.strictEqual(client.getRegion(), REGION_FEISHU);
+  });
+
+  it("creates client with Lark region", () => {
+    const client = createLarkBotClient({
+      appId: "cli_xxxxx",
+      appSecret: "secret123",
+      chatId: "oc_xxxxx",
+      region: "lark",
+    });
+    assert.ok(client);
+    assert.strictEqual(client.isEnabled(), true);
+    assert.strictEqual(client.getRegion(), REGION_LARK);
   });
 
   it("is not enabled when config is incomplete", () => {
@@ -49,6 +88,19 @@ describe("lark-bot-client: createLarkBotClient", () => {
 
     client.updateConfig({ chatId: "oc_new" });
     assert.strictEqual(client.getChatId(), "oc_new");
+  });
+
+  it("updateConfig updates region", () => {
+    const client = createLarkBotClient({
+      appId: "cli_xxxxx",
+      appSecret: "secret123",
+      chatId: "oc_xxxxx",
+      region: "feishu",
+    });
+    assert.strictEqual(client.getRegion(), REGION_FEISHU);
+
+    client.updateConfig({ region: "lark" });
+    assert.strictEqual(client.getRegion(), REGION_LARK);
   });
 
   it("buildApprovalCard creates valid card structure", () => {

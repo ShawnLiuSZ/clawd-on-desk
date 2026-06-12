@@ -1,8 +1,12 @@
 "use strict";
 
-// ── Lark Bot Client — Token management + HTTP API ──
+// ── Lark/Feishu Bot Client — Token management + HTTP API ──
 //
-// Connects to the Lark Open Platform API (open.feishu.cn) using AppID / AppSecret.
+// Connects to the Lark/Feishu Open Platform API using AppID / AppSecret.
+// Supports both:
+//   - Feishu (飞书) for China: open.feishu.cn
+//   - Lark for International: open.larksuite.com
+//
 // Provides:
 //   - Automatic tenant_access_token refresh (7200s TTL, 5-min early renewal)
 //   - Message sending (text + interactive cards)
@@ -17,10 +21,28 @@ const http = require("http");
 const { URL } = require("url");
 const { larkCardText } = require("./lark-bot-i18n");
 
-const TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
-const API_BASE = "https://open.feishu.cn/open-apis";
+// Feishu (飞书) endpoints for China
+const FEISHU_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
+const FEISHU_API_BASE = "https://open.feishu.cn/open-apis";
+
+// Lark endpoints for International
+const LARK_TOKEN_URL = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal";
+const LARK_API_BASE = "https://open.larksuite.com/open-apis";
+
+// Region constants
+const REGION_FEISHU = "feishu";
+const REGION_LARK = "lark";
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+// Get endpoints based on region
+function getEndpoints(region) {
+  if (region === REGION_LARK) {
+    return { tokenUrl: LARK_TOKEN_URL, apiBase: LARK_API_BASE };
+  }
+  // Default to Feishu
+  return { tokenUrl: FEISHU_TOKEN_URL, apiBase: FEISHU_API_BASE };
+}
 
 function compactLog(text, maxLen = 200) {
   let t = String(text == null ? "" : text);
@@ -108,6 +130,10 @@ function createLarkBotClient(config, options = {}) {
   let appId = config.appId || "";
   let appSecret = config.appSecret || "";
   let chatId = config.chatId || "";
+  let region = config.region || REGION_FEISHU; // Default to Feishu for China
+
+  // Get endpoints based on current region
+  const endpoints = getEndpoints(region);
 
   let cachedToken = null;
   let tokenExpiresAt = 0;
@@ -117,6 +143,7 @@ function createLarkBotClient(config, options = {}) {
     if (newConfig.appId !== undefined) appId = String(newConfig.appId || "");
     if (newConfig.appSecret !== undefined) appSecret = String(newConfig.appSecret || "");
     if (newConfig.chatId !== undefined) chatId = String(newConfig.chatId || "");
+    if (newConfig.region !== undefined) region = newConfig.region === REGION_LARK ? REGION_LARK : REGION_FEISHU;
   }
 
   function isConfigured() {
@@ -124,7 +151,8 @@ function createLarkBotClient(config, options = {}) {
   }
 
   async function fetchToken() {
-    const result = await httpPostFn(TOKEN_URL, {
+    const { tokenUrl } = getEndpoints(region);
+    const result = await httpPostFn(tokenUrl, {
       app_id: appId,
       app_secret: appSecret,
     }, { timeout: 10000 });
@@ -163,7 +191,8 @@ function createLarkBotClient(config, options = {}) {
     const token = await getToken().catch(() => null);
     if (!token) return null;
 
-    const url = `${API_BASE}/im/v1/messages?receive_id_type=chat_id`;
+    const { apiBase } = getEndpoints(region);
+    const url = `${apiBase}/im/v1/messages?receive_id_type=chat_id`;
     const body = {
       receive_id: receiveId,
       msg_type: msgType,
@@ -269,6 +298,10 @@ function createLarkBotClient(config, options = {}) {
     return chatId;
   }
 
+  function getRegion() {
+    return region;
+  }
+
   return {
     updateConfig,
     isConfigured,
@@ -280,6 +313,7 @@ function createLarkBotClient(config, options = {}) {
     buildConfirmationCard,
     isEnabled,
     getChatId,
+    getRegion,
     _testCompactLog: compactLog,
   };
 }
@@ -287,7 +321,12 @@ function createLarkBotClient(config, options = {}) {
 module.exports = {
   compactLog,
   httpPost,
-  TOKEN_URL,
-  API_BASE,
+  FEISHU_TOKEN_URL,
+  FEISHU_API_BASE,
+  LARK_TOKEN_URL,
+  LARK_API_BASE,
+  REGION_FEISHU,
+  REGION_LARK,
+  getEndpoints,
   createLarkBotClient,
 };

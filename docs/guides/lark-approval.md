@@ -1,25 +1,34 @@
-# Lark Approval
+# Lark/Feishu Approval
 
 [Back to setup guide](setup-guide.md)
 
-Lark Approval is an optional remote approval path for existing Clawd permission bubbles. When a supported agent asks for tool permission, Clawd keeps the local desktop bubble and also sends an approval card to your Lark bot. The first explicit Allow or Deny decision resolves the same pending permission.
+Lark/Feishu Approval is an optional remote approval path for existing Clawd permission bubbles. When a supported agent asks for tool permission, Clawd keeps the local desktop bubble and also sends an approval card to your Lark/Feishu bot. The first explicit Allow or Deny decision resolves the same pending permission.
 
-This is approval-only. It does not create a Lark chat bridge, remote shell, or prompt-submission path.
+This is approval-only. It does not create a Lark/Feishu chat bridge, remote shell, or prompt-submission path.
+
+## Supported Platforms
+
+- **Feishu (飞书)** — For users in China: [open.feishu.cn](https://open.feishu.cn)
+- **Lark** — For international users: [open.larksuite.com](https://open.larksuite.com)
+
+Both platforms share the same API structure but use different endpoints. The `region` setting determines which endpoints to use.
 
 ## Supported Paths
 
 - Claude Code and CodeBuddy normal permission requests.
 - Codex CLI official `PermissionRequest` hooks when Codex permission handling is in intercept mode.
 
-Lark cards are not sent for DND/native-fallback cases, disabled agents, hidden permission bubbles, opencode, elicitation prompts, passive notifications, or headless sessions.
+Lark/Feishu cards are not sent for DND/native-fallback cases, disabled agents, hidden permission bubbles, opencode, elicitation prompts, passive notifications, or headless sessions.
 
 ## Setup
 
 The Settings tab walks you through three steps in order. Each step is gated until the previous one is saved, so the **Enable** switch and **Send test** button stay disabled until credentials and recipient are in place.
 
-### Step 1 — Create Lark App
+### Step 1 — Create Feishu/Lark App
 
-1. Go to [Lark Open Platform](https://open.feishu.cn/app) and create a new **Enterprise Self-Built App**.
+#### For Feishu (飞书) users in China:
+
+1. Go to [Feishu Open Platform](https://open.feishu.cn/app) and create a new **Enterprise Self-Built App**.
 2. In the app settings, enable the **Bot** capability.
 3. Note down the **App ID** and **App Secret** from the app credentials page.
 4. Under **Permissions & Scopes**, add the following permissions:
@@ -28,13 +37,21 @@ The Settings tab walks you through three steps in order. Each step is gated unti
 5. Under **Event Subscription**, configure a **Request URL** (Webhook URL) where Clawd will receive card interaction callbacks. This should be accessible from the internet.
 6. Publish the app (or use it in test mode within your organization).
 
+#### For Lark international users:
+
+1. Go to [Lark Open Platform](https://open.larksuite.com/app) and create a new **Enterprise Self-Built App**.
+2. Follow the same steps as above for bot capability, permissions, and event subscription.
+
 ### Step 2 — Configure Clawd
 
-Open Clawd Settings → **Remote Approval** → expand the **Lark** card:
+Open Clawd Settings → **Remote Approval** → expand the **Lark/Feishu** card:
 
-1. **App ID** — Paste the App ID from step 1.
-2. **App Secret** — Paste the App Secret from step 1. The secret is stored outside `clawd-prefs.json` in Clawd's user-data `lark-approval.env` file. After saving, the input collapses to a masked preview so you can tell two saved secrets apart without seeing the raw value.
-3. **Chat ID** — Enter the target chat ID (for group chats) or user Open ID (for private messages). You can find this in the Lark Open Platform's API Explorer or by using the Lark Bot API.
+1. **Region** — Select **Feishu** (for China) or **Lark** (for International). This determines which API endpoints to use.
+   - **Feishu**: `open.feishu.cn` (default, recommended for users in China)
+   - **Lark**: `open.larksuite.com` (for international users)
+2. **App ID** — Paste the App ID from step 1.
+3. **App Secret** — Paste the App Secret from step 1. The secret is stored outside `clawd-prefs.json` in Clawd's user-data `lark-approval.env` file. After saving, the input collapses to a masked preview so you can tell two saved secrets apart without seeing the raw value.
+4. **Chat ID** — Enter the target chat ID (for group chats) or user Open ID (for private messages). You can find this in the Feishu/Lark Open Platform's API Explorer or by using the Bot API.
 
 ### Step 3 — Enable & Test
 

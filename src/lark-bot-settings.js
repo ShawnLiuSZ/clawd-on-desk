@@ -1,10 +1,16 @@
 "use strict";
 
+// Region constants - Feishu for China, Lark for International
+const REGION_FEISHU = "feishu";
+const REGION_LARK = "lark";
+const VALID_REGIONS = Object.freeze([REGION_FEISHU, REGION_LARK]);
+
 const DEFAULT_LARK_BOT = Object.freeze({
   enabled: false,
   appId: "",
   appSecret: "",
   chatId: "",        // 目标群聊 ID 或用户 open_id
+  region: REGION_FEISHU, // 默认使用飞书（国内）
   approvalEnabled: true,
   approvalTimeoutMs: 300000, // 5分钟超时
   notifyStates: ["attention", "error"],
@@ -49,6 +55,13 @@ function normalizeNotifyStates(value) {
   return out.length ? out : [...DEFAULT_LARK_BOT.notifyStates];
 }
 
+function normalizeRegion(value) {
+  if (typeof value === "string" && VALID_REGIONS.includes(value)) {
+    return value;
+  }
+  return REGION_FEISHU; // Default to Feishu for China
+}
+
 function normalizeLarkBot(value, defaultsValue = DEFAULT_LARK_BOT) {
   const defaults = isPlainObject(defaultsValue) ? defaultsValue : DEFAULT_LARK_BOT;
   const out = {
@@ -56,6 +69,7 @@ function normalizeLarkBot(value, defaultsValue = DEFAULT_LARK_BOT) {
     appId: trimString(defaults.appId, 64),
     appSecret: trimString(defaults.appSecret, 512),
     chatId: trimString(defaults.chatId, 64),
+    region: normalizeRegion(defaults.region),
     approvalEnabled: defaults.approvalEnabled !== false,
     approvalTimeoutMs: Number.isFinite(defaults.approvalTimeoutMs) && defaults.approvalTimeoutMs > 0
       ? Math.min(defaults.approvalTimeoutMs, 600000)
@@ -68,6 +82,7 @@ function normalizeLarkBot(value, defaultsValue = DEFAULT_LARK_BOT) {
   if (!isPlainObject(value)) return out;
   if (typeof value.enabled === "boolean") out.enabled = value.enabled;
   if (typeof value.approvalEnabled === "boolean") out.approvalEnabled = value.approvalEnabled;
+  if (typeof value.region === "string") out.region = normalizeRegion(value.region);
   if (typeof value.appId === "string") {
     const candidate = trimString(value.appId, 64);
     out.appId = isValidLarkAppId(candidate) ? candidate : "";
@@ -97,7 +112,7 @@ function validateLarkBot(value) {
   }
   for (const key of Object.keys(value)) {
     if (![
-      "enabled", "appId", "appSecret", "chatId",
+      "enabled", "appId", "appSecret", "chatId", "region",
       "approvalEnabled", "approvalTimeoutMs", "notifyStates", "minIntervalMs",
     ].includes(key)) {
       return { status: "error", message: `larkBot.${key} is not supported` };
@@ -117,6 +132,9 @@ function validateLarkBot(value) {
   }
   if (value.chatId !== undefined && typeof value.chatId !== "string") {
     return { status: "error", message: "larkBot.chatId must be a string" };
+  }
+  if (value.region !== undefined && !VALID_REGIONS.includes(value.region)) {
+    return { status: "error", message: `larkBot.region must be one of: ${VALID_REGIONS.join(", ")}` };
   }
   if (value.approvalTimeoutMs !== undefined) {
     if (!Number.isFinite(value.approvalTimeoutMs) || value.approvalTimeoutMs <= 0) {
@@ -145,13 +163,13 @@ function readiness(config) {
   const normalized = normalizeLarkBot(config);
   if (!normalized.enabled) return { ready: false, reason: "disabled", config: normalized };
   if (!normalized.appId) {
-    return { ready: false, reason: "missing-appid", message: "Lark Bot App ID is not configured", config: normalized };
+    return { ready: false, reason: "missing-appid", message: "Lark/Feishu Bot App ID is not configured", config: normalized };
   }
   if (!normalized.appSecret) {
-    return { ready: false, reason: "missing-secret", message: "Lark Bot App Secret is not configured", config: normalized };
+    return { ready: false, reason: "missing-secret", message: "Lark/Feishu Bot App Secret is not configured", config: normalized };
   }
   if (!normalized.chatId) {
-    return { ready: false, reason: "missing-chatid", message: "Lark Bot Chat ID is not configured", config: normalized };
+    return { ready: false, reason: "missing-chatid", message: "Lark/Feishu Bot Chat ID is not configured", config: normalized };
   }
   return { ready: true, config: normalized };
 }
@@ -161,6 +179,9 @@ module.exports = {
   LARK_APPID_RE,
   LARK_CHATID_RE,
   VALID_NOTIFY_STATES,
+  VALID_REGIONS,
+  REGION_FEISHU,
+  REGION_LARK,
   cloneDefaultLarkBot,
   normalizeLarkBot,
   validateLarkBot,

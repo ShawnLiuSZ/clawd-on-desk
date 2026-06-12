@@ -7,6 +7,9 @@ const {
   LARK_APPID_RE,
   LARK_CHATID_RE,
   VALID_NOTIFY_STATES,
+  VALID_REGIONS,
+  REGION_FEISHU,
+  REGION_LARK,
   cloneDefaultLarkBot,
   normalizeLarkBot,
   validateLarkBot,
@@ -26,6 +29,7 @@ describe("lark-bot-settings: cloneDefaultLarkBot", () => {
     assert.strictEqual(a.appId, "");
     assert.strictEqual(a.appSecret, "");
     assert.strictEqual(a.chatId, "");
+    assert.strictEqual(a.region, REGION_FEISHU);
     assert.strictEqual(a.approvalEnabled, true);
     assert.strictEqual(a.approvalTimeoutMs, 300000);
     assert.deepStrictEqual(a.notifyStates, ["attention", "error"]);
@@ -40,6 +44,7 @@ describe("lark-bot-settings: normalizeLarkBot", () => {
     assert.strictEqual(result.appId, "");
     assert.strictEqual(result.appSecret, "");
     assert.strictEqual(result.chatId, "");
+    assert.strictEqual(result.region, REGION_FEISHU);
   });
 
   it("normalizes valid input", () => {
@@ -48,6 +53,7 @@ describe("lark-bot-settings: normalizeLarkBot", () => {
       appId: "cli_xxxxx",
       appSecret: "secret123",
       chatId: "oc_xxxxx",
+      region: "lark",
       approvalEnabled: true,
       approvalTimeoutMs: 60000,
       notifyStates: ["attention", "error", "notification"],
@@ -57,10 +63,21 @@ describe("lark-bot-settings: normalizeLarkBot", () => {
     assert.strictEqual(result.appId, "cli_xxxxx");
     assert.strictEqual(result.appSecret, "secret123");
     assert.strictEqual(result.chatId, "oc_xxxxx");
+    assert.strictEqual(result.region, REGION_LARK);
     assert.strictEqual(result.approvalEnabled, true);
     assert.strictEqual(result.approvalTimeoutMs, 60000);
     assert.deepStrictEqual(result.notifyStates, ["attention", "error", "notification"]);
     assert.strictEqual(result.minIntervalMs, 3000);
+  });
+
+  it("defaults region to feishu when not specified", () => {
+    const result = normalizeLarkBot({ enabled: true, appId: "cli_xxxxx" });
+    assert.strictEqual(result.region, REGION_FEISHU);
+  });
+
+  it("rejects invalid region and defaults to feishu", () => {
+    const result = normalizeLarkBot({ region: "invalid" });
+    assert.strictEqual(result.region, REGION_FEISHU);
   });
 
   it("rejects invalid appId", () => {
