@@ -597,6 +597,108 @@ git commit -m "test(qqbot): backward-compat single-select elicitation still imme
 
 ---
 
+## Task 6: 审批卡片一行一个按钮 + 不截断按钮文字
+
+**背景：** `makeButton`（`src/qq-bot-client.js:284`）把按钮 label 硬截到 36 字符，且 `buildApprovalCard` 用 `chunkRows(buttons, 5)` 每行塞 5 个，导致较长的 suggestion 文案（如 `Always deny <长工具名>`）被截断。本任务改为审批卡片**一行一个按钮**，并**移除按钮文字截断**。
+
+**范围说明：** 仅改审批卡（`buildApprovalCard`）布局；`makeButton` 的截断移除是共享改动。elicitation 卡片的选项按钮在 Task 1 中已自行 `slice` 到 28/30 字符并保持多列网格（一行一个 × 最多 15 选项可能触及 QQ keyboard 行数上限），故不受影响、不改。
+
+**Files:**
+- Modify: `src/qq-bot-client.js`（`makeButton` 281-292 行；`buildApprovalCard` 末尾 `chunkRows(buttons, 5)` 约 355 行）
+- Test: `test/qq-bot-client.test.js`
+
+- [ ] **Step 1: 写失败测试 —— 一行一个按钮 + 长文案不截断**
+
+加到 `test/qq-bot-client.test.js` 的 `describe("qq-bot-client: buildApprovalCard", ...)` 块内：
+
+```js
+it("puts exactly one button per row", () => {
+  const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+  const suggestions = [
+    { type: "addRules", behavior: "allow", toolName: "Bash" },
+    { type: "addRules", behavior: "deny", toolName: "Write" },
+    { type: "setMode", mode: "acceptEdits" },
+  ];
+  const card = client.buildApprovalCard("Bash", { command: "ls" }, "s1", "qq_p", suggestions, "AB");
+  const rows = card.keyboard.content.rows;
+  assert.ok(rows.length >= 5, "allow + deny + 3 suggestions = 5 rows");
+  assert.ok(rows.every((r) => r.buttons.length === 1), "each row has exactly one button");
+});
+
+it("does not truncate long button labels", () => {
+  const client = createQQBotClient(makeConfig(), { httpPost: makeMockHttpPost() });
+  const longTool = "X".repeat(80);
+  const card = client.buildApprovalCard("Bash", { command: "ls" }, "s1", "qq_p", [
+    { type: "addRules", behavior: "allow", toolName: longTool },
+  ], "AB");
+  const buttons = card.keyboard.content.rows.flatMap((r) => r.buttons);
+  const sug = buttons.find((b) => b.action.data === "qq_p|suggestion:0");
+  assert.ok(sug, "suggestion button exists");
+  // "📋 Always <80 X's>" → 远超 36；旧实现会截到 36
+  assert.ok(sug.render_data.label.length > 36, "label is not clamped to 36 chars");
+  assert.ok(sug.render_data.label.includes(longTool), "full tool name preserved");
+});
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `node --test test/qq-bot-client.test.js`
+Expected: FAIL —— `one button per row`（当前是 5/行）与 `not truncate`（当前截到 36）两个用例失败。
+
+- [ ] **Step 3: 移除 makeButton 截断**
+
+把 `src/qq-bot-client.js` 的 `makeButton`（281-292 行）中的 `render_data` 改为不再 `slice`：
+
+```js
+  function makeButton(id, label, permId, behavior, style) {
+    const text = String(label);
+    return {
+      id: String(id),
+      render_data: { label: text, visited_label: text, style: style || 0 },
+      action: {
+        type: 1,
+        permission: { type: 2 },
+        data: `${permId}|${behavior}`,
+        unsupport_tips: "请升级到最新版本 QQ 以使用按钮，或直接回复 y/n",
+      },
+    };
+  }
+```
+
+- [ ] **Step 4: 审批卡片改为一行一个按钮**
+
+把 `buildApprovalCard` 返回值里的 `keyboard`（约 355 行 `chunkRows(buttons, 5)`）改为每行一个：
+
+```js
+    return {
+      // Clamp total content — QQ rejects over-long markdown bodies.
+      markdown: { content: lines.join("\n").slice(0, 1800) },
+      keyboard: { content: { rows: chunkRows(buttons, 1) } },
+    };
+```
+
+- [ ] **Step 5: 运行测试确认通过（含原有用例不回归）**
+
+Run: `node --test test/qq-bot-client.test.js`
+Expected: 新 2 个用例 PASS；原有 `buildApprovalCard` 用例仍全绿（它们只断言 `row.buttons.length <= 5`，1 满足）。
+
+- [ ] **Step 6: 真机验证 QQ 接受长 label（app 关闭时）**
+
+复用 `scripts/qq-elicitation-live-test.js` 的连接 + 发送模式，临时发一条带超长 suggestion 文案的审批卡（例如 `Always deny` + 一个很长的工具名），人工确认：
+1. QQ 客户端**完整显示**按钮文字（不被 QQ 服务端二次截断）；
+2. 发送返回 `status=200`，卡片未被 QQ 拒绝。
+
+若 QQ 服务端对 label 有硬上限并拒绝/截断，则在 `makeButton` 加一个**高位安全上限**（如 `slice(0, 120)`）作为兜底，并在此记录实测到的上限值。否则保持不截断。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add src/qq-bot-client.js test/qq-bot-client.test.js
+git commit -m "feat(qqbot): one button per row and no label truncation in approval card"
+```
+
+---
+
 ## Follow-up（可选，不阻塞）
 
 - **消息撤回减少刷屏**：核实 QQ 是否提供机器人 C2C 消息撤回 / 删除接口（查 q.qq.com 官方文档）。若有，在 `qq-bot-client.js` 增加 `recallMessage(messageId)`，并让 `requestElicitation`/`resendElicitationCard` 记录上一条 card 的 message id、重发时撤回旧卡，使聊天中只留一张活动卡片。若文档确认不支持，则不实现，接受轻微刷屏。
@@ -616,6 +718,7 @@ git commit -m "test(qqbot): backward-compat single-select elicitation still imme
 - 已知限制（无 Other）→ 不渲染 Other 按钮，设计内不实现 ✅
 - 消息撤回（可选）→ Follow-up ✅
 - 跨渠道 cancel → 复用现有 `cancelApproval`，无需改动；旧卡点击无 entry 即 no-op（现有行为）✅
+- 审批卡一行一个按钮 + 不截断文字（用户追加需求）→ Task 6 ✅
 
 **Placeholder scan：** 无 TBD/TODO；每个代码步骤含完整代码。Follow-up 的撤回任务是有意标注的可选项，非占位符。
 
