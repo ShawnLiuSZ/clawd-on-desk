@@ -126,6 +126,7 @@ const {
   validateTelegramApproval,
   validateTelegramBotToken,
 } = require("./telegram-approval-settings");
+const { validateQQBot } = require("./qq-bot-settings");
 const { EVENTS: TELEGRAM_MIGRATION_EVENTS } = require("./telegram-migration-state");
 const {
   validateHardwareBuddySettings,
@@ -436,6 +437,9 @@ const updateRegistry = {
   },
   tgApproval(value) {
     return validateTelegramApproval(value);
+  },
+  qqBot(value) {
+    return validateQQBot(value);
   },
 
   // v0.9.0 spike: persisted migration state across restarts. Shape:
@@ -1131,6 +1135,14 @@ async function telegramApprovalSendTest(_payload, deps = {}) {
   return result || { status: "error", message: "Telegram approval test returned no result" };
 }
 
+async function qqBotTest(_payload, deps = {}) {
+  if (!deps || typeof deps.testQQBotConnection !== "function") {
+    return { status: "error", message: "qqBot.test requires testQQBotConnection dep" };
+  }
+  const result = await deps.testQQBotConnection();
+  return result || { status: "error", message: "QQ Bot test returned no result" };
+}
+
 function cleanupMessage(result) {
   const summary = result && result.summary;
   if (!summary) return "Integration cleanup finished";
@@ -1323,6 +1335,7 @@ const commandRegistry = {
   "telegramApproval.status": telegramApprovalStatus,
   "telegramApproval.tokenInfo": telegramApprovalTokenInfo,
   "telegramApproval.test": telegramApprovalSendTest,
+  "qqBot.test": qqBotTest,
   "telegramMigration.snapshot": telegramMigrationSnapshot,
   "telegramMigration.dispatch": telegramMigrationDispatch,
 };

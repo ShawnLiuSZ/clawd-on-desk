@@ -258,6 +258,30 @@ function startRemoteApproval(ctx, permEntry) {
   }
 }
 
+function startRemoteQQApproval(ctx, permEntry) {
+  if (permEntry && permEntry.toolName === "ExitPlanMode") return;
+
+  // Elicitation (AskUserQuestion) requests use a separate QQ card with
+  // option buttons rather than Allow/Deny.
+  if (permEntry && permEntry.isElicitation) {
+    if (typeof ctx.maybeStartRemoteQQElicitation === "function") {
+      try {
+        ctx.maybeStartRemoteQQElicitation(permEntry);
+      } catch (err) {
+        ctx.permLog(`qq remote elicitation start failed: ${err && err.message ? err.message : err}`);
+      }
+    }
+    return;
+  }
+
+  if (typeof ctx.maybeStartRemoteQQApproval !== "function") return;
+  try {
+    ctx.maybeStartRemoteQQApproval(permEntry);
+  } catch (err) {
+    ctx.permLog(`qq remote approval start failed: ${err && err.message ? err.message : err}`);
+  }
+}
+
 function addPendingPermission(ctx, permEntry) {
   if (typeof ctx.addPendingPermission === "function") {
     return ctx.addPendingPermission(permEntry);
@@ -563,6 +587,7 @@ function handlePermissionPost(req, res, options) {
           return;
         }
         startRemoteApproval(ctx, permEntry);
+        startRemoteQQApproval(ctx, permEntry);
         return;
       }
 
@@ -660,6 +685,7 @@ function handlePermissionPost(req, res, options) {
           return;
         }
         startRemoteApproval(ctx, permEntry);
+        startRemoteQQApproval(ctx, permEntry);
         return;
       }
 
@@ -1134,6 +1160,7 @@ function handlePermissionPost(req, res, options) {
         return;
       }
       startRemoteApproval(ctx, permEntry);
+      startRemoteQQApproval(ctx, permEntry);
     } catch (err) {
       ctx.permLog(`/permission handler error: ${err && err.message}`);
       // Response may already be sent (opencode branch 200-ACKs before

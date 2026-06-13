@@ -21,10 +21,33 @@
     testPending: false,
     formDraft: null,
     formDirty: false,
+    qqBotTestPending: false,
+    qqBotTestResult: null,
+    qqBotTestSeq: 0,
+    qqBotDraft: null,
+    qqBotDirty: false,
+    qqBotEditing: false,
   };
 
   function t(key) {
     return helpers.t(key);
+  }
+
+  function currentQQBotConfig() {
+    const cfg = state.snapshot && state.snapshot.qqBot;
+    return {
+      enabled: !!(cfg && cfg.enabled),
+      appId: cfg && typeof cfg.appId === "string" ? cfg.appId : "",
+      appSecretConfigured: !!(cfg && typeof cfg.appSecret === "string" && cfg.appSecret),
+      approvalEnabled: !!(cfg && cfg.approvalEnabled !== false),
+    };
+  }
+
+  function qqBotDraftSecret() {
+    if (!view.qqBotDraft || !view.qqBotDirty) {
+      view.qqBotDraft = { value: "" };
+    }
+    return view.qqBotDraft;
   }
 
   function currentConfig() {
@@ -161,6 +184,7 @@
     // page can stay tidy as external approval channels grow.
     parent.appendChild(buildTelegramChannelCard());
     parent.appendChild(buildHardwareBuddyChannelCard());
+    parent.appendChild(buildQQBotChannelCard());
   }
 
   // ── v0.9.0 migration card ──────────────────────────────────────────────────
@@ -942,6 +966,397 @@
     ctrl.appendChild(btn);
     row.appendChild(ctrl);
     return row;
+  }
+
+  // ── QQ Bot channel card ──
+
+  function buildQQBotChannelCard() {
+    const cfg = currentQQBotConfig();
+    const ready = !!cfg.appId;
+    const statusKind = qqBotStatusKind(cfg);
+    return helpers.buildCollapsibleGroup({
+      id: "remote-approval.qq-bot",
+      headerContent: buildQQBotChannelHeader(statusKind),
+      defaultCollapsed: false,
+      className: "remote-approval-channel-card tg-approval-channel-card",
+      children: [
+        buildQQBotStatusRow(cfg, statusKind),
+        helpers.buildSection("AppID / AppSecret", [buildQQBotAppIdRow(cfg), buildQQBotAppSecretRow()]),
+        helpers.buildSection("Enable / Test", [buildQQBotEnabledRow(cfg, ready), buildQQBotOpenidRow(cfg, ready), buildQQBotTestRow(cfg, ready)]),
+      ],
+    });
+  }
+
+  function qqBotStatusKind(cfg) {
+    if (!cfg.appId) return "incomplete";
+    if (!cfg.appSecretConfigured) return "incomplete";
+    return "ready";
+  }
+
+  function buildQQBotChannelHeader(kind) {
+    const wrap = document.createElement("div");
+    wrap.className = "tg-approval-channel-header";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "tg-approval-channel-name";
+    nameEl.textContent = "QQ Bot";
+    wrap.appendChild(nameEl);
+
+    const badge = document.createElement("span");
+    badge.className = "tg-approval-channel-badge " + statusBadgeClass(kind);
+    const dot = document.createElement("span");
+    dot.className = "tg-approval-channel-badge-dot";
+    badge.appendChild(dot);
+    const badgeText = document.createElement("span");
+    badgeText.textContent = t("telegramApprovalCardKind_" + kind);
+    badge.appendChild(badgeText);
+    wrap.appendChild(badge);
+
+    return wrap;
+  }
+
+  function buildQQBotStatusRow(cfg, kind) {
+    const row = document.createElement("div");
+    row.className = "tg-approval-channel-status-row " + statusBadgeClass(kind);
+    const text = document.createElement("span");
+    text.className = "tg-approval-channel-status-text";
+    if (!cfg.appId) {
+      text.textContent = "Not configured — enter your AppID below.";
+    } else if (!cfg.appSecretConfigured) {
+      text.textContent = "AppID configured. Enter AppSecret to activate.";
+    } else {
+      text.textContent = "Configured: AppID " + cfg.appId.slice(0, 6) + "…, secret is set.";
+    }
+    row.appendChild(text);
+    return row;
+  }
+
+  function buildQQBotAppIdRow(cfg) {
+    const row = document.createElement("div");
+    row.className = "row tg-approval-recipient-row";
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = "AppID";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = "Your QQ Bot AppID from q.qq.com.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control tg-approval-input-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.spellcheck = false;
+    input.placeholder = "123456";
+    input.className = "tg-approval-input";
+    input.value = cfg.appId || "";
+    input.addEventListener("change", () => {
+      const val = String(input.value || "").trim();
+      if (val && /^\d{6,20}$/.test(val)) {
+        saveQQBotField("appId", val);
+      } else if (!val) {
+        saveQQBotField("appId", "");
+      }
+    });
+    ctrl.appendChild(input);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "soft-btn accent";
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", () => {
+      const val = String(input.value || "").trim();
+      if (!val) return;
+      saveQQBotField("appId", val);
+    });
+    ctrl.appendChild(saveBtn);
+    row.appendChild(ctrl);
+    return row;
+  }
+
+  function buildQQBotAppSecretRow() {
+    const cfg = currentQQBotConfig();
+    if (cfg.appSecretConfigured && !view.qqBotEditing) {
+      return buildQQBotSecretStoredRow();
+    }
+    return buildQQBotSecretEditRow();
+  }
+
+  function buildQQBotSecretStoredRow() {
+    const row = document.createElement("div");
+    row.className = "row tg-approval-token-stored-row";
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label tg-approval-token-stored-label";
+    label.textContent = "AppSecret is configured";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = "The secret is stored locally. Click Replace to update it.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "soft-btn";
+    btn.textContent = "Replace Secret";
+    btn.addEventListener("click", () => {
+      view.qqBotEditing = true;
+      view.qqBotDraft = { value: "" };
+      view.qqBotDirty = true;
+      ops.requestRender({ content: true });
+    });
+    ctrl.appendChild(btn);
+    row.appendChild(ctrl);
+    return row;
+  }
+
+  function buildQQBotSecretEditRow() {
+    const draft = qqBotDraftSecret();
+    const cfg = currentQQBotConfig();
+    const row = document.createElement("div");
+    row.className = "row tg-approval-recipient-row";
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = "AppSecret";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = cfg.appSecretConfigured
+      ? "Enter a new secret to replace the current one."
+      : "Your QQ Bot AppSecret from q.qq.com.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control tg-approval-input-row";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = cfg.appSecretConfigured ? "Leave blank to keep current" : "Paste AppSecret here";
+    input.className = "tg-approval-input";
+    input.value = draft.value;
+    input.addEventListener("input", () => {
+      draft.value = input.value;
+      view.qqBotDirty = true;
+    });
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "soft-btn accent";
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", () => {
+      const val = String(draft.value || "").trim();
+      if (!val) return;
+      saveQQBotField("appSecret", val);
+      draft.value = "";
+      view.qqBotEditing = false;
+      view.qqBotDirty = true;
+    });
+    ctrl.appendChild(input);
+    ctrl.appendChild(saveBtn);
+
+    if (cfg.appSecretConfigured) {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "soft-btn";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => {
+        view.qqBotEditing = false;
+        view.qqBotDraft = null;
+        view.qqBotDirty = false;
+        ops.requestRender({ content: true });
+      });
+      ctrl.appendChild(cancelBtn);
+    }
+
+    row.appendChild(ctrl);
+    return row;
+  }
+
+  function buildQQBotEnabledRow(cfg, ready) {
+    const row = document.createElement("div");
+    row.className = "row";
+    if (!ready) row.classList.add("tg-approval-row-disabled");
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = "Enabled";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = "Enable QQ Bot for remote approval.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control";
+    const sw = document.createElement("div");
+    sw.className = "switch";
+    sw.setAttribute("role", "switch");
+    sw.setAttribute("tabindex", "0");
+    helpers.setSwitchVisual(sw, cfg.enabled);
+    if (!ready) {
+      sw.classList.add("disabled");
+      sw.setAttribute("aria-disabled", "true");
+      sw.removeAttribute("tabindex");
+    } else {
+      const toggle = () => {
+        saveQQBotField("enabled", !cfg.enabled);
+      };
+      sw.addEventListener("click", toggle);
+      sw.addEventListener("keydown", (ev) => {
+        if (ev.key === " " || ev.key === "Enter") {
+          ev.preventDefault();
+          toggle();
+        }
+      });
+    }
+    ctrl.appendChild(sw);
+    row.appendChild(ctrl);
+    return row;
+  }
+
+  function buildQQBotOpenidRow(cfg, ready) {
+    const current = (state.snapshot && state.snapshot.qqBot) ? state.snapshot.qqBot : {};
+    const hasOpenid = !!(current && typeof current.userOpenid === "string" && current.userOpenid);
+    const row = document.createElement("div");
+    row.className = "row tg-approval-recipient-row";
+    if (!ready) row.classList.add("tg-approval-row-disabled");
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = "User OpenID";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = hasOpenid
+      ? "OpenID is configured."
+      : "Auto-discovered when you message the bot via QQ, or enter manually.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    if (hasOpenid) {
+      const hint = document.createElement("span");
+      hint.className = "tg-approval-token-masked";
+      hint.textContent = current.userOpenid.slice(0, 8) + "…";
+      text.appendChild(hint);
+    }
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control tg-approval-input-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.spellcheck = false;
+    input.placeholder = hasOpenid ? current.userOpenid.slice(0, 12) + "…" : "Paste OpenID or leave blank";
+    input.className = "tg-approval-input";
+    input.addEventListener("change", () => {
+      const val = String(input.value || "").trim();
+      if (val) saveQQBotField("userOpenid", val);
+    });
+    ctrl.appendChild(input);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "soft-btn accent";
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", () => {
+      const val = String(input.value || "").trim();
+      if (!val) return;
+      saveQQBotField("userOpenid", val);
+    });
+    ctrl.appendChild(saveBtn);
+    row.appendChild(ctrl);
+    return row;
+  }
+
+  function buildQQBotTestRow(cfg, ready) {
+    const testDisabled = view.qqBotTestPending || !ready || !cfg.enabled;
+    const row = document.createElement("div");
+    row.className = "row";
+    if (!ready || !cfg.enabled) row.classList.add("tg-approval-row-disabled");
+
+    const text = document.createElement("div");
+    text.className = "row-text";
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = "Test Connection";
+    const desc = document.createElement("span");
+    desc.className = "row-desc";
+    desc.textContent = "Send the bot a C2C message first to auto-discover your OpenID, then test the connection.";
+    text.appendChild(label);
+    text.appendChild(desc);
+    row.appendChild(text);
+
+    const ctrl = document.createElement("div");
+    ctrl.className = "row-control";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "soft-btn accent";
+    btn.textContent = view.qqBotTestPending ? "Testing…" : "Test Connection";
+    btn.disabled = testDisabled;
+    btn.addEventListener("click", () => {
+      if (testDisabled) return;
+      view.qqBotTestPending = true;
+      view.qqBotTestResult = null;
+      ops.requestRender({ content: true });
+      callCommand("qqBot.test").then((result) => {
+        view.qqBotTestPending = false;
+        view.qqBotTestResult = result;
+        ops.requestRender({ content: true });
+        if (result && result.status === "ok") {
+          ops.showToast("QQ Bot connection test passed.");
+        } else {
+          ops.showToast((result && result.message) || "QQ Bot test failed", { error: true });
+        }
+      });
+    });
+    ctrl.appendChild(btn);
+    row.appendChild(ctrl);
+
+    if (view.qqBotTestResult && view.qqBotTestResult.status !== "ok") {
+      const errEl = document.createElement("div");
+      errEl.className = "form-error";
+      errEl.textContent = view.qqBotTestResult.message || "Unknown error";
+      row.appendChild(errEl);
+    }
+
+    return row;
+  }
+
+  function saveQQBotField(key, value) {
+    if (!window.settingsAPI || typeof window.settingsAPI.update !== "function") {
+      ops.showToast(t("toastSaveFailed") + "settings API unavailable", { error: true });
+      return;
+    }
+    const current = (state.snapshot && state.snapshot.qqBot) ? { ...state.snapshot.qqBot } : {};
+    current[key] = value;
+    window.settingsAPI.update("qqBot", current).then((result) => {
+      if (!result || result.status !== "ok") {
+        ops.showToast((result && result.message) || t("toastSaveFailed"), { error: true });
+      } else {
+        ops.showToast("QQ Bot config saved.");
+      }
+      ops.requestRender({ content: true });
+    }).catch((err) => {
+      ops.showToast(t("toastSaveFailed") + (err && err.message), { error: true });
+    });
   }
 
   // ── Save / shared ──

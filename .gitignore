@@ -43,6 +43,13 @@ docs/**
 !docs/cloudling/specs/
 !docs/cloudling/specs/core-states.md
 !docs/cloudling/specs/special-states.md
+!docs/superpowers/
+!docs/superpowers/specs/
+!docs/superpowers/specs/2026-06-12-qq-multiselect-elicitation-design.md
+!docs/superpowers/specs/2026-06-12-qq-button-i18n-design.md
+!docs/superpowers/plans/
+!docs/superpowers/plans/2026-06-12-qq-multiselect-elicitation.md
+!docs/superpowers/plans/2026-06-12-qq-button-i18n.md
 !docs/releases/
 !docs/releases/release-v0.5.5.md
 !docs/releases/release-v0.6.0.md
