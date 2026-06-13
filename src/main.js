@@ -28,6 +28,11 @@ const {
   formatTelegramStatusDiagnostic,
 } = require("./telegram-approval-runtime-status");
 const { createTelegramMigrationController } = require("./telegram-migration-controller");
+const { createLarkBotClient } = require("./lark-bot-client");
+const { createLarkApprovalBridge } = require("./lark-approval");
+const { createLarkNotifier } = require("./lark-notify");
+const { normalizeLarkBot } = require("./lark-bot-settings");
+const { createLarkWsClient } = require("./lark-ws-client");
 const { createTelegramSidecarStatusBridge } = require("./telegram-sidecar-status-bridge");
 const { createQQBotClient } = require("./qq-bot-client");
 const { createQQApprovalBridge } = require("./qq-approval");
@@ -295,6 +300,7 @@ const _settingsController = createSettingsController({
     testWechatBotConnection: () => testWechatBotConnection(),
     getWechatQrcode: () => getWechatQrcode(),
     pollWechatQrcodeStatus: (key) => pollWechatQrcodeStatus(key),
+    testLarkBotConnection: () => testLarkBotConnection(),
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1351,6 +1357,14 @@ const _permCtx = {
     const wxConfig = _settingsController.get("wechatBot");
     return wxConfig ? normalizeWechatBot(wxConfig) : null;
   },
+  getLarkApprovalBridge: () => getOrCreateLarkApprovalBridge(),
+  getLarkBotConfig: () => _settingsController ? _settingsController.get("larkBot") : null,
+  cancelLarkApproval: (permEntry) => {
+    const bridge = getOrCreateLarkApprovalBridge();
+    if (bridge && typeof bridge.cancelApproval === "function") {
+      try { bridge.cancelApproval(permEntry); } catch {}
+    }
+  },
   onPermissionsChanged: () => {
     if (hardwareBuddyAdapter) hardwareBuddyAdapter.notifyPermissionsChanged();
   },
@@ -1360,7 +1374,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, maybeStartRemoteQQElicitation, maybeStartRemoteWechatApproval, maybeStartRemoteWechatElicitation, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, maybeStartRemoteQQElicitation, maybeStartRemoteWechatApproval, maybeStartRemoteWechatElicitation, maybeStartRemoteLarkApproval, cancelLarkApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -1789,6 +1803,7 @@ const _serverCtx = {
   maybeStartRemoteQQElicitation,
   maybeStartRemoteWechatApproval,
   maybeStartRemoteWechatElicitation,
+  maybeStartRemoteLarkApproval,
   replyOpencodePermission,
   permLog,
 };
@@ -3081,6 +3096,14 @@ _settingsController.subscribeKey("wechatBot", () => {
     getOrCreateWechatClient();
   }
 }
+// Start/stop the Feishu/Lark WebSocket long-connection to match config.
+// (Initial dial happens at the end of the Lark integration section below,
+// once _larkWsClient and friends are initialized — avoids a TDZ on the lets.)
+_settingsController.subscribeKey("larkBot", () => {
+  try { reconcileLarkRuntime(); } catch (err) {
+    console.warn("Clawd: lark reconcile failed:", err && err.message);
+  }
+});
 _settingsController.subscribeKey("mobilePreviewEnabled", async (enabled) => {
   if (enabled) {
     if (!_lanWss) {
@@ -3784,4 +3807,171 @@ if (!gotTheLock) {
     if (!isQuitting) return;
     app.quit();
   });
+}
+
+// ── Lark Bot Integration ──
+let _larkBotClient = null;
+let _larkApprovalBridge = null;
+let _larkNotifier = null;
+
+function getOrCreateLarkBotClient() {
+  const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
+  if (!larkConfig || !larkConfig.enabled) {
+    _larkBotClient = null;
+    _larkNotifier = null;
+    return null;
+  }
+  const normalized = normalizeLarkBot(larkConfig);
+  if (_larkBotClient) {
+    _larkBotClient.updateConfig(normalized);
+    return _larkBotClient;
+  }
+  _larkBotClient = createLarkBotClient(normalized, { log: console.log, getLang: () => lang });
+  _larkNotifier = createLarkNotifier(_larkBotClient, { log: console.log, getLang: () => lang });
+  return _larkBotClient;
+}
+
+function getOrCreateLarkApprovalBridge() {
+  if (_larkApprovalBridge) return _larkApprovalBridge;
+  const client = getOrCreateLarkBotClient();
+  if (!client) return null;
+  _larkApprovalBridge = createLarkApprovalBridge(client, {
+    log: console.log,
+    getAuthorizedChatId: () => {
+      const c = _settingsController ? _settingsController.get("larkBot") : null;
+      return (c && c.chatId) || "";
+    },
+  });
+  try { _larkApprovalBridge.start(); } catch (err) {
+    console.log(`lark-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+  return _larkApprovalBridge;
+}
+
+function getOrCreateLarkNotifier() {
+  if (_larkNotifier) return _larkNotifier;
+  const client = getOrCreateLarkBotClient();
+  if (!client) return null;
+  _larkNotifier = createLarkNotifier(client, { log: console.log, getLang: () => lang });
+  return _larkNotifier;
+}
+
+async function testLarkBotConnection() {
+  const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
+  if (!larkConfig || !larkConfig.enabled) {
+    return { status: "error", message: "Lark Bot is not enabled" };
+  }
+  const normalized = normalizeLarkBot(larkConfig);
+  if (!normalized.appId || !normalized.appSecret) {
+    return { status: "error", message: "Lark Bot App ID or App Secret is not configured" };
+  }
+  if (!normalized.chatId) {
+    return { status: "error", message: "No chat bound yet — send any message to your bot in Feishu/Lark first" };
+  }
+  const client = createLarkBotClient(normalized, { log: console.log, getLang: () => lang });
+  try {
+    const token = await client.getToken();
+    if (!token) {
+      return { status: "error", message: "Failed to get Lark access token" };
+    }
+    const result = await client.sendTextMessage("Clawd Lark Bot connection test");
+    if (result) {
+      return { status: "ok", message: "Lark Bot connection successful" };
+    }
+    return { status: "error", message: "Failed to send test message" };
+  } catch (err) {
+    return { status: "error", message: `Lark Bot connection failed: ${err && err.message ? err.message : String(err)}` };
+  }
+}
+
+// ── Lark WebSocket long-connection (receives events without a public IP) ──
+//
+// Replaces the old HTTP webhook + device-code scan. The official SDK dials out
+// to Feishu's gateway with app_id/app_secret and delivers incoming messages and
+// card-button taps over the socket. The first chat the bot sees is auto-bound as
+// the approval target, so the user never has to look up a chat_id.
+
+let _larkWsClient = null;
+
+function handleLarkIncomingMessage(msg) {
+  if (!msg || !msg.chatId) return;
+  // Auto-bind: the first chat the bot receives a message from becomes the
+  // approval target (so the push side + isAuthorizedSender know where to go).
+  const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
+  if (larkConfig && !larkConfig.chatId) {
+    const normalized = normalizeLarkBot(larkConfig);
+    _settingsController.applyUpdate("larkBot", { ...normalized, chatId: msg.chatId });
+    console.log(`lark-ws: auto-bound approval chat → ${msg.chatId}`);
+  }
+  // Text replies ("y/n CODE") are a fallback to card buttons.
+  if (msg.text) {
+    const bridge = getOrCreateLarkApprovalBridge();
+    if (bridge && typeof bridge.handleTextReply === "function") {
+      bridge.handleTextReply({ text: msg.text, chatId: msg.chatId });
+    }
+  }
+}
+
+function handleLarkCardAction(evt) {
+  const bridge = getOrCreateLarkApprovalBridge();
+  if (bridge && typeof bridge.handleCardCallback === "function") {
+    // Return value flows back to Feishu as the card-callback response (in-place
+    // card update for elicitation toggles, or a toast).
+    return bridge.handleCardCallback(evt);
+  }
+  return undefined;
+}
+
+// Start/stop the WebSocket connection to match the current larkBot config.
+// Called at startup and on every larkBot settings change.
+function reconcileLarkRuntime() {
+  if (!_settingsController) return;
+  const larkConfig = _settingsController.get("larkBot");
+  const enabled = !!(larkConfig && larkConfig.enabled);
+  const normalized = enabled ? normalizeLarkBot(larkConfig) : null;
+  const canConnect = !!(normalized && normalized.appId && normalized.appSecret);
+
+  // Keep the push-side client (notifier/bridge) in sync with the config too.
+  getOrCreateLarkBotClient();
+
+  if (!canConnect) {
+    if (_larkWsClient) {
+      try { _larkWsClient.stop(); } catch (err) {
+        console.log(`lark-ws: stop failed — ${err && err.message ? err.message : String(err)}`);
+      }
+      _larkWsClient = null;
+    }
+    // Drop the cached bridge so a later re-enable rebuilds it with a fresh client.
+    _larkApprovalBridge = null;
+    return;
+  }
+
+  if (_larkWsClient) {
+    _larkWsClient.updateConfig({
+      appId: normalized.appId,
+      appSecret: normalized.appSecret,
+      region: normalized.region,
+    });
+    return;
+  }
+
+  _larkWsClient = createLarkWsClient({
+    appId: normalized.appId,
+    appSecret: normalized.appSecret,
+    region: normalized.region,
+    log: console.log,
+    onMessage: handleLarkIncomingMessage,
+    onCardAction: handleLarkCardAction,
+    sdk: require("@larksuiteoapi/node-sdk"),
+  });
+  try {
+    _larkWsClient.start();
+  } catch (err) {
+    console.log(`lark-ws: start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+}
+
+// Dial once on startup in case Lark was already enabled in a previous session.
+try { reconcileLarkRuntime(); } catch (err) {
+  console.warn("Clawd: initial lark reconcile failed:", err && err.message);
 }

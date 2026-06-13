@@ -256,6 +256,14 @@ function startRemoteApproval(ctx, permEntry) {
   } catch (err) {
     ctx.permLog(`telegram remote approval start failed: ${err && err.message ? err.message : err}`);
   }
+  // Also start Lark remote approval if configured
+  if (typeof ctx.maybeStartRemoteLarkApproval === "function") {
+    try {
+      ctx.maybeStartRemoteLarkApproval(permEntry);
+    } catch (err) {
+      ctx.permLog(`lark remote approval start failed: ${err && err.message ? err.message : err}`);
+    }
+  }
 }
 
 function startRemoteQQApproval(ctx, permEntry) {
@@ -1110,6 +1118,16 @@ function handlePermissionPost(req, res, options) {
         recordRequestHookEvent.accepted();
         try {
           ctx.showPermissionBubble(permEntry);
+          // Route elicitation to Lark only — it can render a multi-select card.
+          // Telegram has no elicitation card, so it is intentionally skipped
+          // (we don't call startRemoteApproval, which would also hit Telegram).
+          if (typeof ctx.maybeStartRemoteLarkApproval === "function") {
+            try {
+              ctx.maybeStartRemoteLarkApproval(permEntry);
+            } catch (larkErr) {
+              ctx.permLog(`lark elicitation start failed: ${larkErr && larkErr.message ? larkErr.message : larkErr}`);
+            }
+          }
         } catch (bubbleErr) {
           ctx.permLog(`elicitation bubble failed: ${bubbleErr && bubbleErr.message} -> terminal fallback`);
           removePendingPermission(ctx, permEntry, "elicitation-bubble-failed");
