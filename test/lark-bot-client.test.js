@@ -151,6 +151,8 @@ describe("lark-bot-client: createLarkBotClient", () => {
 
     assert.ok(card.config.wide_screen_mode);
     assert.ok(card.header.title.content.includes("已允许"));
+    // Short code in the title lets the user tell which request was acted on.
+    assert.ok(card.header.title.content.includes("AB12"));
     assert.strictEqual(card.header.template, "green");
   });
 
@@ -168,5 +170,49 @@ describe("lark-bot-client: createLarkBotClient", () => {
 
     assert.ok(card.header.title.content.includes("已拒绝"));
     assert.strictEqual(card.header.template, "red");
+  });
+});
+
+describe("lark-bot-client: buildElicitationCard", () => {
+  const mk = () => createLarkBotClient(
+    { appId: "cli_xxxxx", appSecret: "secret123", chatId: "oc_xxxxx" },
+    { getLang: () => "en" }
+  );
+
+  it("multi-select: ✓/▢ option buttons + submit, encoded values", () => {
+    const client = mk();
+    const toolInput = { questions: [
+      { question: "Pick langs", header: "Langs", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
+    ] };
+    const card = client.buildElicitationCard(toolInput, "lark_1", "AB12", [[1]], false);
+
+    const actionEls = card.elements.filter((e) => e.tag === "action");
+    const optionAction = actionEls[0];
+    assert.strictEqual(optionAction.actions[0].value.action, "elicitation:0:0");
+    assert.strictEqual(optionAction.actions[1].value.action, "elicitation:0:1");
+    assert.strictEqual(optionAction.actions[0].value.permId, "lark_1");
+    // option 1 is selected → "✓ B"; option 0 not → "▢ A"
+    assert.ok(optionAction.actions[1].text.content.startsWith("✓"));
+    assert.ok(optionAction.actions[0].text.content.startsWith("▢"));
+    // a submit button exists with the elicitation-submit value
+    const submit = actionEls[actionEls.length - 1].actions[0];
+    assert.strictEqual(submit.value.action, "elicitation-submit");
+  });
+
+  it("single-select: plain option buttons, no submit button", () => {
+    const client = mk();
+    const toolInput = { questions: [{ question: "Q", options: [{ label: "A" }, { label: "B" }] }] };
+    const card = client.buildElicitationCard(toolInput, "lark_2", "CD34", null, false);
+    const submits = card.elements
+      .filter((e) => e.tag === "action")
+      .flatMap((e) => e.actions)
+      .filter((b) => b.value.action === "elicitation-submit");
+    assert.strictEqual(submits.length, 0, "single-select has no submit button");
+  });
+
+  it("buildCardUpdateResponse wraps a card as a raw in-place update", () => {
+    const client = mk();
+    const resp = client.buildCardUpdateResponse({ x: 1 });
+    assert.deepStrictEqual(resp, { card: { type: "raw", data: { x: 1 } } });
   });
 });

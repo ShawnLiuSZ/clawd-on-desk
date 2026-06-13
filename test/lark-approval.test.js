@@ -120,10 +120,13 @@ describe("lark-approval: createLarkApprovalBridge", () => {
 
     const pending = bridge._testGetPendingApprovals();
     const permId = pending.keys().next().value;
+    const shortCode = pending.get(permId).shortCode;
 
-    bridge.handleCardCallback({ permId, action: "allow", chatId: "oc_xxxxx" });
+    const resp = bridge.handleCardCallback({ permId, action: "allow", chatId: "oc_xxxxx" });
     assert.strictEqual(resolvedBehavior, "allow");
     assert.strictEqual(bridge.getPendingCount(), 0);
+    // The tap toast names the short code so the user knows which one was acted on.
+    assert.ok(resp && resp.toast && resp.toast.content.includes(shortCode));
   });
 
   it("handleTextReply resolves when single pending", () => {
@@ -208,5 +211,121 @@ describe("lark-approval: createLarkApprovalBridge", () => {
 
     bridge.stop();
     assert.strictEqual(bridge.getPendingCount(), 0);
+  });
+});
+
+describe("lark-approval: elicitation (multi-select)", () => {
+  function elicClient() {
+    const sent = [];
+    return {
+      sent,
+      isEnabled: () => true,
+      sendCardMessage: (card) => { sent.push(card); return Promise.resolve(); },
+      buildApprovalCard: (payload) => ({ mock: true, payload }),
+      buildConfirmationCard: (payload, behavior) => ({ mock: true, payload, behavior }),
+      buildElicitationCard: (toolInput, permId, shortCode, selections, warn) => ({
+        elic: true, permId, shortCode, selections: JSON.parse(JSON.stringify(selections || null)), warn: !!warn,
+      }),
+      buildCardUpdateResponse: (card) => ({ card: { type: "raw", data: card } }),
+    };
+  }
+
+  const multiEntry = () => ({
+    isElicitation: true,
+    toolName: "AskUserQuestion",
+    toolInput: { questions: [
+      { question: "Pick langs", multiSelect: true, options: [{ label: "A" }, { label: "B" }, { label: "C" }] },
+    ] },
+  });
+
+  it("requestElicitation sends a card and stores a multi pending entry", () => {
+    const client = elicClient();
+    const bridge = createLarkApprovalBridge(client);
+    const ok = bridge.requestElicitation(multiEntry(), () => {});
+    assert.strictEqual(ok, true);
+    assert.strictEqual(client.sent.length, 1);
+    assert.strictEqual(client.sent[0].elic, true);
+    const entry = bridge._testGetPendingApprovals().values().next().value;
+    assert.strictEqual(entry.isElicitation, true);
+    assert.strictEqual(entry.isElicitationMulti, true);
+    assert.deepStrictEqual(entry.selections, [[]]);
+  });
+
+  it("toggle updates selections and returns an in-place card update", () => {
+    const client = elicClient();
+    const bridge = createLarkApprovalBridge(client);
+    bridge.requestElicitation(multiEntry(), () => {});
+    const permId = bridge._testGetPendingApprovals().keys().next().value;
+
+    const r1 = bridge.handleCardCallback({ permId, action: "elicitation:0:0", chatId: "oc_1" });
+    assert.ok(r1 && r1.card && r1.card.type === "raw", "toggle returns a card-update response");
+    const r2 = bridge.handleCardCallback({ permId, action: "elicitation:0:2", chatId: "oc_1" });
+    assert.deepStrictEqual(r2.card.data.selections, [[0, 2]]);
+    assert.strictEqual(bridge.getPendingCount(), 1, "toggles do not resolve");
+  });
+
+  it("submit with all questions answered resolves with joined labels", () => {
+    const client = elicClient();
+    const bridge = createLarkApprovalBridge(client);
+    let resolved = null;
+    bridge.requestElicitation(multiEntry(), (entry, behavior) => { resolved = behavior; });
+    const permId = bridge._testGetPendingApprovals().keys().next().value;
+
+    bridge.handleCardCallback({ permId, action: "elicitation:0:0", chatId: "oc_1" });
+    bridge.handleCardCallback({ permId, action: "elicitation:0:2", chatId: "oc_1" });
+    const resp = bridge.handleCardCallback({ permId, action: "elicitation-submit", chatId: "oc_1" });
+
+    assert.deepStrictEqual(resolved, { type: "elicitation-submit", answers: { "Pick langs": "A, C" } });
+    assert.ok(resp && resp.toast, "submit returns a toast");
+    assert.strictEqual(bridge.getPendingCount(), 0);
+  });
+
+  it("submit with an unanswered question re-renders with a warning, does not resolve", () => {
+    const client = elicClient();
+    const bridge = createLarkApprovalBridge(client);
+    let resolved = null;
+    bridge.requestElicitation(multiEntry(), (e, b) => { resolved = b; });
+    const permId = bridge._testGetPendingApprovals().keys().next().value;
+
+    const resp = bridge.handleCardCallback({ permId, action: "elicitation-submit", chatId: "oc_1" });
+    assert.strictEqual(resolved, null);
+    assert.strictEqual(resp.card.data.warn, true);
+    assert.strictEqual(bridge.getPendingCount(), 1);
+  });
+
+  it("single-select click resolves immediately, deferring other questions", () => {
+    const client = elicClient();
+    const bridge = createLarkApprovalBridge(client);
+    let resolved = null;
+    const entry = {
+      isElicitation: true,
+      toolName: "AskUserQuestion",
+      toolInput: { questions: [
+        { question: "Q1", options: [{ label: "A" }, { label: "B" }] },
+        { question: "Q2", options: [{ label: "X" }, { label: "Y" }] },
+      ] },
+    };
+    bridge.requestElicitation(entry, (e, b) => { resolved = b; });
+    const permId = bridge._testGetPendingApprovals().keys().next().value;
+
+    bridge.handleCardCallback({ permId, action: "elicitation:0:1", chatId: "oc_1" });
+    assert.deepStrictEqual(resolved, {
+      type: "elicitation-submit",
+      answers: { Q1: "B", Q2: "Defer to agent" },
+    });
+    assert.strictEqual(bridge.getPendingCount(), 0);
+  });
+
+  it("ignores elicitation interaction from a non-authorized sender", () => {
+    const client = elicClient();
+    const bridge = createLarkApprovalBridge(client, { getAuthorizedChatId: () => "oc_owner" });
+    let resolved = null;
+    bridge.requestElicitation(multiEntry(), (e, b) => { resolved = b; });
+    const permId = bridge._testGetPendingApprovals().keys().next().value;
+
+    const resp = bridge.handleCardCallback({ permId, action: "elicitation:0:0", chatId: "oc_intruder" });
+    assert.strictEqual(resp, undefined);
+    assert.strictEqual(resolved, null);
+    assert.strictEqual(bridge.getPendingCount(), 1);
   });
 });

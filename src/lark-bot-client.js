@@ -270,12 +270,15 @@ function createLarkBotClient(config, options = {}) {
   }
 
   function buildConfirmationCard(payload, behavior) {
-    const { toolName, agentName } = payload;
+    const { toolName, agentName, shortCode } = payload;
     const isAllow = behavior === "allow";
+    // Surface the short code in the title so the user can tell exactly which
+    // request was acted on (avoids re-approving the same one).
+    const codeSuffix = shortCode ? ` [${shortCode}]` : "";
     return {
       config: { wide_screen_mode: true },
       header: {
-        title: { tag: "plain_text", content: isAllow ? "✅ 已允许" : "❌ 已拒绝" },
+        title: { tag: "plain_text", content: (isAllow ? "✅ 已允许" : "❌ 已拒绝") + codeSuffix },
         template: isAllow ? "green" : "red",
       },
       elements: [
@@ -288,6 +291,79 @@ function createLarkBotClient(config, options = {}) {
         },
       ],
     };
+  }
+
+  // Interactive elicitation (AskUserQuestion) card. Pure single-select forms
+  // resolve on a single tap (no submit button); forms with any multiSelect
+  // question render ✓/▢ toggles + a Submit button. Option buttons carry
+  // value {permId, action:"elicitation:<qi>:<oi>"}; submit carries
+  // value {permId, action:"elicitation-submit"}. Selection state is held by the
+  // approval bridge, not the buttons.
+  function buildElicitationCard(toolInput, permId, shortCode, selections, warn) {
+    const questions = (toolInput && Array.isArray(toolInput.questions)) ? toolInput.questions : [];
+    const isMulti = questions.some((q) => q && q.multiSelect);
+    const sel = Array.isArray(selections) ? selections : [];
+    const elements = [];
+    let totalSelected = 0;
+
+    for (let qi = 0; qi < questions.length; qi++) {
+      const q = questions[qi];
+      if (!q || typeof q !== "object") continue;
+      const header = q.header ? `**${q.header}**\n` : "";
+      const prompt = typeof q.question === "string" ? q.question : "";
+      elements.push({ tag: "div", text: { tag: "lark_md", content: `${header}${prompt}` } });
+
+      const options = Array.isArray(q.options) ? q.options : [];
+      const selectedForQ = Array.isArray(sel[qi]) ? sel[qi] : [];
+      const actions = [];
+      for (let oi = 0; oi < options.length; oi++) {
+        const opt = options[oi];
+        if (!opt || typeof opt !== "object") continue;
+        const isSel = selectedForQ.indexOf(oi) !== -1;
+        if (isSel) totalSelected++;
+        const label = opt.label || `Option ${oi + 1}`;
+        actions.push({
+          tag: "button",
+          text: { tag: "plain_text", content: isMulti ? `${isSel ? "✓ " : "▢ "}${label}` : label },
+          type: isSel ? "primary" : "default",
+          value: { permId, action: `elicitation:${qi}:${oi}` },
+        });
+      }
+      if (actions.length) elements.push({ tag: "action", actions });
+    }
+
+    if (isMulti) {
+      elements.push({ tag: "hr" });
+      elements.push({
+        tag: "action",
+        actions: [{
+          tag: "button",
+          text: { tag: "plain_text", content: `✅ ${tr("submitDone", { n: totalSelected })}` },
+          type: "primary",
+          value: { permId, action: "elicitation-submit" },
+        }],
+      });
+    }
+
+    const noteParts = [];
+    if (warn) noteParts.push(`⚠️ ${tr("elicitNeedAll")}`);
+    else if (isMulti) noteParts.push(tr("elicitHint"));
+    if (shortCode) noteParts.push(`[${shortCode}]`);
+    elements.push({ tag: "note", elements: [{ tag: "plain_text", content: noteParts.join("  ") || " " }] });
+
+    return {
+      // update_multi lets Feishu replace this card in place when the
+      // card.action.trigger callback returns a new card (toggle ✓ refresh).
+      config: { wide_screen_mode: true, update_multi: true },
+      header: { title: { tag: "plain_text", content: `💬 ${tr("elicitTitle")}` }, template: "blue" },
+      elements,
+    };
+  }
+
+  // Wrap a card as the response Feishu uses to update the message in place from
+  // a card.action.trigger callback. Isolated so the exact shape is easy to tweak.
+  function buildCardUpdateResponse(card) {
+    return { card: { type: "raw", data: card } };
   }
 
   function isEnabled() {
@@ -311,6 +387,8 @@ function createLarkBotClient(config, options = {}) {
     sendMessage,
     buildApprovalCard,
     buildConfirmationCard,
+    buildElicitationCard,
+    buildCardUpdateResponse,
     isEnabled,
     getChatId,
     getRegion,

@@ -883,10 +883,14 @@ function isRemoteRichApprovalSupported(permEntry) {
   return REMOTE_RICH_APPROVAL_AGENT_IDS.has(agentId);
 }
 
-function isRemoteApprovalActionable(permEntry) {
+function isRemoteApprovalActionable(permEntry, opts = {}) {
   if (!permEntry || typeof permEntry !== "object") return false;
-  if (permEntry.isElicitation || permEntry.isCodexNotify || permEntry.isKimiNotify || permEntry.isOpencode || permEntry.isAntigravity || permEntry.isCopilotCli) return false;
-  if (permEntry.toolName === "ExitPlanMode" || permEntry.toolName === "AskUserQuestion") return false;
+  // Elicitation / AskUserQuestion are normally local-only, but channels that can
+  // render a multi-select card (Lark) opt in via allowElicitation.
+  const allowElicitation = opts.allowElicitation === true;
+  if (!allowElicitation && (permEntry.isElicitation || permEntry.toolName === "AskUserQuestion")) return false;
+  if (permEntry.isCodexNotify || permEntry.isKimiNotify || permEntry.isOpencode || permEntry.isAntigravity || permEntry.isCopilotCli) return false;
+  if (permEntry.toolName === "ExitPlanMode") return false;
   if (PASSTHROUGH_TOOLS.has(permEntry.toolName)) return false;
   // Headless sessions auto-deny locally; mirror that on the Telegram side so a
   // non-interactive Codex/CC run never sends an actionable approval card.
@@ -1126,7 +1130,8 @@ function cancelLarkApproval(permEntry) {
 }
 
 function maybeStartRemoteLarkApproval(permEntry) {
-  if (!isRemoteApprovalActionable(permEntry)) return false;
+  // Lark can render multi-select elicitation cards, so allow elicitation here.
+  if (!isRemoteApprovalActionable(permEntry, { allowElicitation: true })) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
   const bridge = getLarkApprovalBridge();
   if (!bridge || typeof bridge.requestApproval !== "function") return false;
@@ -1138,10 +1143,24 @@ function maybeStartRemoteLarkApproval(permEntry) {
     : (ctx.larkBotConfig || null);
   const resolveFn = (entry, behavior) => {
     if (pendingPermissions.indexOf(entry) === -1) return;
+    // Elicitation submit arrives as { type: "elicitation-submit", answers }.
+    // resolvePermissionEntry only understands string behaviors, so translate it
+    // the same way the desktop bubble's IPC handler does: stash the answers as
+    // resolvedUpdatedInput, then resolve "allow" (which sends updatedInput back).
+    if (entry.isElicitation && behavior && typeof behavior === "object" && behavior.type === "elicitation-submit") {
+      entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, behavior.answers);
+      resolvePermissionEntry(entry, "allow");
+      return;
+    }
     resolvePermissionEntry(entry, behavior);
   };
+  const isElicitation = !!permEntry.isElicitation && typeof bridge.requestElicitation === "function";
   try {
-    bridge.requestApproval(permEntry, resolveFn, larkConfig);
+    if (isElicitation) {
+      bridge.requestElicitation(permEntry, resolveFn, larkConfig);
+    } else {
+      bridge.requestApproval(permEntry, resolveFn, larkConfig);
+    }
   } catch (err) {
     permLog(`lark remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
     return false;

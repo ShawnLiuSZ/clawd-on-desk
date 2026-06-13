@@ -32,6 +32,7 @@ const { createLarkBotClient } = require("./lark-bot-client");
 const { createLarkApprovalBridge } = require("./lark-approval");
 const { createLarkNotifier } = require("./lark-notify");
 const { normalizeLarkBot } = require("./lark-bot-settings");
+const { createLarkWsClient } = require("./lark-ws-client");
 const { createTelegramSidecarStatusBridge } = require("./telegram-sidecar-status-bridge");
 const initUpdateBubble = require("./update-bubble");
 const { registerUpdateBubbleIpc } = initUpdateBubble;
@@ -288,6 +289,7 @@ const _settingsController = createSettingsController({
     getTelegramApprovalTokenInfo: () => getTelegramApprovalTokenInfo(),
     sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     deleteTelegramApprovalTokenFile: () => deleteTelegramApprovalTokenFile(),
+    testLarkBotConnection: () => testLarkBotConnection(),
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1589,6 +1591,7 @@ const _serverCtx = {
   removePendingPermission,
   showPermissionBubble,
   maybeStartRemoteApproval,
+  maybeStartRemoteLarkApproval,
   replyOpencodePermission,
   permLog,
 };
@@ -2843,6 +2846,14 @@ _settingsController.subscribeKey("tgApproval", () => {
   if (suppressTelegramApprovalSidecarSync > 0) return;
   queueTelegramApprovalSidecarSync("settings");
 });
+// Start/stop the Feishu/Lark WebSocket long-connection to match config.
+// (Initial dial happens at the end of the Lark integration section below,
+// once _larkWsClient and friends are initialized — avoids a TDZ on the lets.)
+_settingsController.subscribeKey("larkBot", () => {
+  try { reconcileLarkRuntime(); } catch (err) {
+    console.warn("Clawd: lark reconcile failed:", err && err.message);
+  }
+});
 _settingsController.subscribeKey("mobilePreviewEnabled", async (enabled) => {
   if (enabled) {
     if (!_lanWss) {
@@ -3601,7 +3612,7 @@ async function testLarkBotConnection() {
     return { status: "error", message: "Lark Bot App ID or App Secret is not configured" };
   }
   if (!normalized.chatId) {
-    return { status: "error", message: "Lark Bot Chat ID is not configured" };
+    return { status: "error", message: "No chat bound yet — send any message to your bot in Feishu/Lark first" };
   }
   const client = createLarkBotClient(normalized, { log: console.log, getLang: () => lang });
   try {
@@ -3617,4 +3628,96 @@ async function testLarkBotConnection() {
   } catch (err) {
     return { status: "error", message: `Lark Bot connection failed: ${err && err.message ? err.message : String(err)}` };
   }
+}
+
+// ── Lark WebSocket long-connection (receives events without a public IP) ──
+//
+// Replaces the old HTTP webhook + device-code scan. The official SDK dials out
+// to Feishu's gateway with app_id/app_secret and delivers incoming messages and
+// card-button taps over the socket. The first chat the bot sees is auto-bound as
+// the approval target, so the user never has to look up a chat_id.
+
+let _larkWsClient = null;
+
+function handleLarkIncomingMessage(msg) {
+  if (!msg || !msg.chatId) return;
+  // Auto-bind: the first chat the bot receives a message from becomes the
+  // approval target (so the push side + isAuthorizedSender know where to go).
+  const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
+  if (larkConfig && !larkConfig.chatId) {
+    const normalized = normalizeLarkBot(larkConfig);
+    _settingsController.applyUpdate("larkBot", { ...normalized, chatId: msg.chatId });
+    console.log(`lark-ws: auto-bound approval chat → ${msg.chatId}`);
+  }
+  // Text replies ("y/n CODE") are a fallback to card buttons.
+  if (msg.text) {
+    const bridge = getOrCreateLarkApprovalBridge();
+    if (bridge && typeof bridge.handleTextReply === "function") {
+      bridge.handleTextReply({ text: msg.text, chatId: msg.chatId });
+    }
+  }
+}
+
+function handleLarkCardAction(evt) {
+  const bridge = getOrCreateLarkApprovalBridge();
+  if (bridge && typeof bridge.handleCardCallback === "function") {
+    // Return value flows back to Feishu as the card-callback response (in-place
+    // card update for elicitation toggles, or a toast).
+    return bridge.handleCardCallback(evt);
+  }
+  return undefined;
+}
+
+// Start/stop the WebSocket connection to match the current larkBot config.
+// Called at startup and on every larkBot settings change.
+function reconcileLarkRuntime() {
+  if (!_settingsController) return;
+  const larkConfig = _settingsController.get("larkBot");
+  const enabled = !!(larkConfig && larkConfig.enabled);
+  const normalized = enabled ? normalizeLarkBot(larkConfig) : null;
+  const canConnect = !!(normalized && normalized.appId && normalized.appSecret);
+
+  // Keep the push-side client (notifier/bridge) in sync with the config too.
+  getOrCreateLarkBotClient();
+
+  if (!canConnect) {
+    if (_larkWsClient) {
+      try { _larkWsClient.stop(); } catch (err) {
+        console.log(`lark-ws: stop failed — ${err && err.message ? err.message : String(err)}`);
+      }
+      _larkWsClient = null;
+    }
+    // Drop the cached bridge so a later re-enable rebuilds it with a fresh client.
+    _larkApprovalBridge = null;
+    return;
+  }
+
+  if (_larkWsClient) {
+    _larkWsClient.updateConfig({
+      appId: normalized.appId,
+      appSecret: normalized.appSecret,
+      region: normalized.region,
+    });
+    return;
+  }
+
+  _larkWsClient = createLarkWsClient({
+    appId: normalized.appId,
+    appSecret: normalized.appSecret,
+    region: normalized.region,
+    log: console.log,
+    onMessage: handleLarkIncomingMessage,
+    onCardAction: handleLarkCardAction,
+    sdk: require("@larksuiteoapi/node-sdk"),
+  });
+  try {
+    _larkWsClient.start();
+  } catch (err) {
+    console.log(`lark-ws: start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+}
+
+// Dial once on startup in case Lark was already enabled in a previous session.
+try { reconcileLarkRuntime(); } catch (err) {
+  console.warn("Clawd: initial lark reconcile failed:", err && err.message);
 }

@@ -942,6 +942,7 @@ function loadTelegramApprovalTabForTest({
   snapshot,
   settingsAPI = {},
   confirm = () => true,
+  loadLark = false,
 } = {}) {
   const body = new FakeElement("body");
   const content = new FakeElement("main");
@@ -992,6 +993,11 @@ function loadTelegramApprovalTabForTest({
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(SRC_DIR, "settings-hardware-buddy-panel.js"), "utf8"), context);
+  if (loadLark) {
+    // Loaded before the telegram tab so telegram's init() can wire up the Lark
+    // panel via globalThis.initSettingsTabLarkApproval.
+    vm.runInContext(fs.readFileSync(path.join(SRC_DIR, "settings-tab-lark-approval.js"), "utf8"), context);
+  }
   vm.runInContext(fs.readFileSync(path.join(SRC_DIR, "settings-tab-telegram-approval.js"), "utf8"), context);
 
   const core = {
@@ -1367,6 +1373,111 @@ describe("settings renderer browser environment", () => {
     harness.render();
 
     assert.equal(harness.content.querySelectorAll("input")[0].value, "987654321");
+  });
+
+  it("renders the Lark/Feishu approval card inside the remote approval tab", async () => {
+    const harness = loadTelegramApprovalTabForTest({
+      loadLark: true,
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        larkBot: {
+          enabled: true,
+          appId: "cli_xxxxx",
+          appSecret: "secret",
+          chatId: "oc_xxxxx",
+          region: "feishu",
+          authMode: "app_secret",
+        },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+
+    // The Lark channel name uses the i18n key "larkBot" (mock t() echoes keys)
+    // and the shared remote-approval header class for visual parity with the
+    // Telegram / Hardware Buddy channel cards.
+    const channelNames = harness.content
+      .querySelectorAll(".tg-approval-channel-name")
+      .map((el) => el.textContent);
+    assert.ok(
+      channelNames.includes("larkBot"),
+      "Lark/Feishu approval card should be rendered in the remote approval tab",
+    );
+
+    // Lark must reuse the shared remote-approval vocabulary (status banner,
+    // animated switch, soft buttons) rather than its own ad-hoc widgets, so it
+    // looks identical to the Telegram / Hardware Buddy cards.
+    const larkGroup = harness.content.querySelector(".lark-approval-channel-card");
+    assert.ok(larkGroup, "Lark card should use the remote-approval collapsible group");
+    assert.ok(
+      larkGroup.querySelector(".tg-approval-channel-status-row"),
+      "Lark card should render the shared status banner",
+    );
+    assert.ok(larkGroup.querySelector(".switch"), "Lark enable toggle should use the shared switch");
+    assert.ok(larkGroup.querySelector(".soft-btn"), "Lark buttons should use the shared soft-btn style");
+
+    // WebSocket model: the auto-bound chat shows as a binding row (label key
+    // "larkBotBoundChat") with the bound chat id and a "Rebind" button — there
+    // is no manual Chat ID input anymore.
+    const rowLabels = larkGroup.querySelectorAll(".row-label").map((el) => el.textContent);
+    assert.ok(rowLabels.includes("larkBotBoundChat"), "Lark card should render the bound-chat row");
+    const softBtnLabels = larkGroup.querySelectorAll(".soft-btn").map((el) => el.textContent);
+    assert.ok(softBtnLabels.includes("larkBotRebind"), "bound chat should offer a Rebind button");
+
+    // Legacy ad-hoc classes and the removed device-code mode must be gone.
+    for (const legacy of [".settings-row", ".settings-btn", ".toggle-switch", ".radio-group", ".channel-header", ".lark-device-auth-control", ".device-auth-qr"]) {
+      assert.equal(
+        larkGroup.querySelector(legacy),
+        null,
+        `Lark card should no longer use legacy class ${legacy}`,
+      );
+    }
+  });
+
+  it("saves Lark config without UI-only fields and preserves the stored app secret", async () => {
+    const { validateLarkBot } = require("../src/lark-bot-settings");
+    const harness = loadTelegramApprovalTabForTest({
+      loadLark: true,
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        larkBot: {
+          enabled: true,
+          appId: "cli_old",
+          appSecret: "secret-123",
+          chatId: "oc_xxxxx",
+          region: "feishu",
+          authMode: "app_secret",
+        },
+      },
+    });
+    await Promise.resolve();
+    harness.render();
+
+    const larkGroup = harness.content.querySelector(".lark-approval-channel-card");
+    const appIdInput = larkGroup.querySelectorAll("input").find((el) => el.placeholder === "cli_xxxxx");
+    assert.ok(appIdInput, "App ID input should render");
+    appIdInput.value = "cli_new";
+    appIdInput.dispatchEvent({ type: "change" });
+
+    const larkUpdate = harness.updates.find((u) => u.key === "larkBot");
+    assert.ok(larkUpdate, "saving App ID should issue a larkBot update");
+    // UI-only derived flag must not leak into the persisted payload.
+    assert.equal(larkUpdate.value.appSecretConfigured, undefined);
+    // A non-secret save must preserve the stored secret (the store replaces the
+    // whole larkBot object, so the payload has to carry it through).
+    assert.equal(larkUpdate.value.appSecret, "secret-123");
+    assert.equal(larkUpdate.value.appId, "cli_new");
+    // And the payload must satisfy the real backend validator.
+    assert.deepEqual(validateLarkBot(larkUpdate.value), { status: "ok" });
   });
 
   it("preserves notifyOnComplete=false through a Telegram approval disable save", async () => {

@@ -161,6 +161,9 @@
     // page can stay tidy as external approval channels grow.
     parent.appendChild(buildTelegramChannelCard());
     parent.appendChild(buildHardwareBuddyChannelCard());
+    if (larkRender) {
+      larkRender(parent);
+    }
   }
 
   // ── v0.9.0 migration card ──────────────────────────────────────────────────
@@ -1001,11 +1004,25 @@
     return parts.join("");
   }
 
+  let larkRender = null;
+
   function init(core) {
     coreRef = core;
     state = core.state;
     helpers = core.helpers;
     ops = core.ops;
+
+    // Init Lark/Feishu panel if available
+    if (globalThis.initSettingsTabLarkApproval) {
+      const larkTab = globalThis.initSettingsTabLarkApproval({
+        state,
+        coreRef: core,
+        helpers,
+        ops,
+      });
+      larkRender = larkTab.render;
+    }
+
     core.tabs["telegram-approval"] = { render };
   }
 

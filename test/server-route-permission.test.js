@@ -60,6 +60,7 @@ function makeCtx(overrides = {}) {
     replyOpencodePermission: [],
     resolved: [],
     maybeStartRemoteApproval: [],
+    maybeStartRemoteLarkApproval: [],
     addPendingPermission: [],
     removePendingPermission: [],
   };
@@ -83,6 +84,7 @@ function makeCtx(overrides = {}) {
     replyOpencodePermission: (payload) => calls.replyOpencodePermission.push(payload),
     resolvePermissionEntry: (entry, behavior, message) => calls.resolved.push({ entry, behavior, message }),
     maybeStartRemoteApproval: (entry) => calls.maybeStartRemoteApproval.push(entry),
+    maybeStartRemoteLarkApproval: (entry) => calls.maybeStartRemoteLarkApproval.push(entry),
     addPendingPermission(entry) {
       calls.addPendingPermission.push(entry);
       this.pendingPermissions.push(entry);
@@ -640,6 +642,19 @@ describe("server-route-permission POST", () => {
       const res = await callPermissionPost(JSON.stringify(item.body), { ctx: item.ctx || {} });
       assert.deepStrictEqual(res.ctx.calls.maybeStartRemoteApproval, [], item.body.tool_name);
     }
+  });
+
+  it("routes AskUserQuestion elicitation to Lark only (not Telegram)", async () => {
+    const res = await callPermissionPost(JSON.stringify({
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [{ question: "Q", options: [{ label: "A" }, { label: "B" }] }] },
+    }));
+    // Telegram has no elicitation card → never invoked.
+    assert.deepStrictEqual(res.ctx.calls.maybeStartRemoteApproval, []);
+    // Lark renders a multi-select card → invoked with the elicitation entry.
+    assert.strictEqual(res.ctx.calls.maybeStartRemoteLarkApproval.length, 1);
+    assert.strictEqual(res.ctx.calls.maybeStartRemoteLarkApproval[0].isElicitation, true);
+    assert.strictEqual(res.ctx.calls.maybeStartRemoteLarkApproval[0].toolName, "AskUserQuestion");
   });
 
   // ── Copilot CLI branch ──

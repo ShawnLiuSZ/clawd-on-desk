@@ -8,10 +8,14 @@ const {
   LARK_CHATID_RE,
   VALID_NOTIFY_STATES,
   VALID_REGIONS,
+  VALID_AUTH_MODES,
+  AUTH_MODE_APP_SECRET,
+  AUTH_MODE_DEVICE_CODE,
   REGION_FEISHU,
   REGION_LARK,
   cloneDefaultLarkBot,
   normalizeLarkBot,
+  normalizeAuthMode,
   validateLarkBot,
   maskLarkAppSecret,
   isValidLarkAppId,
@@ -34,6 +38,9 @@ describe("lark-bot-settings: cloneDefaultLarkBot", () => {
     assert.strictEqual(a.approvalTimeoutMs, 300000);
     assert.deepStrictEqual(a.notifyStates, ["attention", "error"]);
     assert.strictEqual(a.minIntervalMs, 5000);
+    assert.strictEqual(a.authMode, AUTH_MODE_APP_SECRET);
+    assert.strictEqual(a.deviceUserOpenId, "");
+    assert.strictEqual(a.deviceUserName, "");
   });
 });
 
@@ -109,6 +116,37 @@ describe("lark-bot-settings: normalizeLarkBot", () => {
     const result = normalizeLarkBot({ notifyStates: ["attention", "attention", "error"] });
     assert.deepStrictEqual(result.notifyStates, ["attention", "error"]);
   });
+
+  it("preserves authMode defaults to app_secret when not specified", () => {
+    const result = normalizeLarkBot({ appId: "cli_xxxxx" });
+    assert.strictEqual(result.authMode, AUTH_MODE_APP_SECRET);
+  });
+
+  it("normalizes authMode to device_code", () => {
+    const result = normalizeLarkBot({ authMode: AUTH_MODE_DEVICE_CODE });
+    assert.strictEqual(result.authMode, AUTH_MODE_DEVICE_CODE);
+  });
+
+  it("normalizes invalid authMode to app_secret", () => {
+    const result = normalizeLarkBot({ authMode: "invalid" });
+    assert.strictEqual(result.authMode, AUTH_MODE_APP_SECRET);
+  });
+
+  it("preserves deviceUserOpenId and deviceUserName", () => {
+    const result = normalizeLarkBot({
+      authMode: AUTH_MODE_DEVICE_CODE,
+      deviceUserOpenId: "ou_abc123",
+      deviceUserName: "张三",
+    });
+    assert.strictEqual(result.authMode, AUTH_MODE_DEVICE_CODE);
+    assert.strictEqual(result.deviceUserOpenId, "ou_abc123");
+    assert.strictEqual(result.deviceUserName, "张三");
+  });
+
+  it("trims deviceUserOpenId to max 64 chars", () => {
+    const result = normalizeLarkBot({ deviceUserOpenId: "a".repeat(100) });
+    assert.strictEqual(result.deviceUserOpenId.length, 64);
+  });
 });
 
 describe("lark-bot-settings: validateLarkBot", () => {
@@ -145,6 +183,61 @@ describe("lark-bot-settings: validateLarkBot", () => {
     const result = validateLarkBot({ approvalTimeoutMs: -1 });
     assert.strictEqual(result.status, "error");
     assert.ok(result.message.includes("positive number"));
+  });
+
+  it("accepts valid authMode", () => {
+    const result = validateLarkBot({ authMode: AUTH_MODE_DEVICE_CODE });
+    assert.strictEqual(result.status, "ok");
+  });
+
+  it("rejects invalid authMode", () => {
+    const result = validateLarkBot({ authMode: "invalid" });
+    assert.strictEqual(result.status, "error");
+    assert.ok(result.message.includes("authMode"));
+  });
+
+  it("accepts valid deviceUserOpenId", () => {
+    const result = validateLarkBot({ deviceUserOpenId: "ou_abc123" });
+    assert.strictEqual(result.status, "ok");
+  });
+
+  it("rejects invalid deviceUserOpenId type", () => {
+    const result = validateLarkBot({ deviceUserOpenId: 123 });
+    assert.strictEqual(result.status, "error");
+    assert.ok(result.message.includes("string"));
+  });
+
+  it("accepts valid deviceUserName", () => {
+    const result = validateLarkBot({ deviceUserName: "张三" });
+    assert.strictEqual(result.status, "ok");
+  });
+
+  it("rejects invalid deviceUserName type", () => {
+    const result = validateLarkBot({ deviceUserName: 123 });
+    assert.strictEqual(result.status, "error");
+    assert.ok(result.message.includes("string"));
+  });
+});
+
+describe("lark-bot-settings: normalizeAuthMode", () => {
+  it("returns app_secret for null/undefined input", () => {
+    assert.strictEqual(normalizeAuthMode(null), AUTH_MODE_APP_SECRET);
+    assert.strictEqual(normalizeAuthMode(undefined), AUTH_MODE_APP_SECRET);
+  });
+
+  it("returns app_secret for invalid input", () => {
+    assert.strictEqual(normalizeAuthMode("invalid"), AUTH_MODE_APP_SECRET);
+    assert.strictEqual(normalizeAuthMode(""), AUTH_MODE_APP_SECRET);
+    assert.strictEqual(normalizeAuthMode(123), AUTH_MODE_APP_SECRET);
+  });
+
+  it("returns valid auth modes", () => {
+    assert.strictEqual(normalizeAuthMode(AUTH_MODE_APP_SECRET), AUTH_MODE_APP_SECRET);
+    assert.strictEqual(normalizeAuthMode(AUTH_MODE_DEVICE_CODE), AUTH_MODE_DEVICE_CODE);
+  });
+
+  it("VALID_AUTH_MODES contains both modes", () => {
+    assert.deepStrictEqual(VALID_AUTH_MODES, [AUTH_MODE_APP_SECRET, AUTH_MODE_DEVICE_CODE]);
   });
 });
 
@@ -211,13 +304,16 @@ describe("lark-bot-settings: readiness", () => {
     assert.strictEqual(result.reason, "missing-secret");
   });
 
-  it("returns missing-chatid when chatId is empty", () => {
-    const result = readiness({ enabled: true, appId: "app", appSecret: "secret" });
-    assert.strictEqual(result.ready, false);
-    assert.strictEqual(result.reason, "missing-chatid");
+  // WebSocket model: chatId is auto-bound when the user messages the bot, so it
+  // no longer gates readiness — it's reported separately as `bound`.
+  it("is ready-but-unbound when creds are present but no chat bound yet", () => {
+    const result = readiness({ enabled: true, appId: "cli_x", appSecret: "secret" });
+    assert.strictEqual(result.ready, true);
+    assert.strictEqual(result.bound, false);
+    assert.strictEqual(result.reason, "unbound");
   });
 
-  it("returns ready when all required fields are present", () => {
+  it("returns ready+bound when creds and a bound chat are present", () => {
     const result = readiness({
       enabled: true,
       appId: "cli_xxxxx",
@@ -225,6 +321,7 @@ describe("lark-bot-settings: readiness", () => {
       chatId: "oc_xxxxx",
     });
     assert.strictEqual(result.ready, true);
+    assert.strictEqual(result.bound, true);
     assert.ok(result.config);
   });
 });
