@@ -127,6 +127,7 @@ const {
   validateTelegramBotToken,
 } = require("./telegram-approval-settings");
 const { validateQQBot } = require("./qq-bot-settings");
+const { validateWechatBot } = require("./wechat-bot-settings");
 const { EVENTS: TELEGRAM_MIGRATION_EVENTS } = require("./telegram-migration-state");
 const {
   validateHardwareBuddySettings,
@@ -440,6 +441,9 @@ const updateRegistry = {
   },
   qqBot(value) {
     return validateQQBot(value);
+  },
+  wechatBot(value) {
+    return validateWechatBot(value);
   },
 
   // v0.9.0 spike: persisted migration state across restarts. Shape:
@@ -1143,6 +1147,39 @@ async function qqBotTest(_payload, deps = {}) {
   return result || { status: "error", message: "QQ Bot test returned no result" };
 }
 
+async function wechatBotTest(_payload, deps = {}) {
+  if (!deps || typeof deps.testWechatBotConnection !== "function") {
+    return { status: "error", message: "wechatBot.test requires testWechatBotConnection dep" };
+  }
+  const result = await deps.testWechatBotConnection();
+  return result || { status: "error", message: "WeChat Bot test returned no result" };
+}
+
+async function wechatBotGetQrcode(_payload, deps = {}) {
+  if (!deps || typeof deps.getWechatQrcode !== "function") {
+    return { status: "error", message: "wechatBot.getQrcode requires getWechatQrcode dep" };
+  }
+  try {
+    return await deps.getWechatQrcode();
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "Failed to get QR code" };
+  }
+}
+
+async function wechatBotPollQrcodeStatus(payload, deps = {}) {
+  if (!payload || !payload.qrcode) {
+    return { status: "error", message: "qrcode key is required" };
+  }
+  if (!deps || typeof deps.pollWechatQrcodeStatus !== "function") {
+    return { status: "error", message: "wechatBot.pollQrcodeStatus requires pollWechatQrcodeStatus dep" };
+  }
+  try {
+    return await deps.pollWechatQrcodeStatus(payload.qrcode);
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "Failed to poll QR code status" };
+  }
+}
+
 function cleanupMessage(result) {
   const summary = result && result.summary;
   if (!summary) return "Integration cleanup finished";
@@ -1336,6 +1373,9 @@ const commandRegistry = {
   "telegramApproval.tokenInfo": telegramApprovalTokenInfo,
   "telegramApproval.test": telegramApprovalSendTest,
   "qqBot.test": qqBotTest,
+  "wechatBot.test": wechatBotTest,
+  "wechatBot.getQrcode": wechatBotGetQrcode,
+  "wechatBot.pollQrcodeStatus": wechatBotPollQrcodeStatus,
   "telegramMigration.snapshot": telegramMigrationSnapshot,
   "telegramMigration.dispatch": telegramMigrationDispatch,
 };

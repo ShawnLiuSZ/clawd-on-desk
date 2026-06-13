@@ -1023,6 +1023,7 @@ function dismissPermissionForTerminal(perm) {
   // the splice and the abort.
   cancelRemoteApproval(perm);
   cancelQQApproval(perm);
+  cancelWechatApproval(perm);
   const idx = pendingPermissions.indexOf(perm);
   if (idx !== -1) {
     pendingPermissions.splice(idx, 1);
@@ -1122,6 +1123,23 @@ function cancelQQApproval(permEntry) {
   }
 }
 
+function getWechatApprovalBridge() {
+  if (typeof ctx.getWechatApprovalBridge === "function") {
+    try { return ctx.getWechatApprovalBridge(); } catch (err) {
+      permLog(`wechat approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.wechatApprovalBridge || null;
+}
+
+function cancelWechatApproval(permEntry) {
+  const bridge = getWechatApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
 function maybeStartRemoteQQApproval(permEntry) {
   if (!isRemoteApprovalActionable(permEntry)) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
@@ -1149,6 +1167,30 @@ function maybeStartRemoteQQApproval(permEntry) {
   return true;
 }
 
+function maybeStartRemoteWechatApproval(permEntry) {
+  if (!isRemoteApprovalActionable(permEntry)) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const bridge = getWechatApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    resolvePermissionEntry(entry, behavior);
+  };
+  try {
+    bridge.requestApproval(permEntry, resolveFn, wxConfig);
+  } catch (err) {
+    permLog(`wechat remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
 function maybeStartRemoteQQElicitation(permEntry) {
   if (!permEntry || !permEntry.isElicitation) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
@@ -1169,6 +1211,31 @@ function maybeStartRemoteQQElicitation(permEntry) {
     bridge.requestElicitation(permEntry, resolveFn, qqConfig);
   } catch (err) {
     permLog(`qq remote elicitation failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+function maybeStartRemoteWechatElicitation(permEntry) {
+  if (!permEntry || !permEntry.isElicitation) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const bridge = getWechatApprovalBridge();
+  if (!bridge || typeof bridge.requestElicitation !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  const resolveFn = (entry, answers) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, answers);
+    resolvePermissionEntry(entry, "allow");
+  };
+  try {
+    bridge.requestElicitation(permEntry, resolveFn, wxConfig);
+  } catch (err) {
+    permLog(`wechat remote elicitation failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
     return false;
   }
   return true;
@@ -1213,6 +1280,7 @@ function applyPermissionSuggestion(perm, index, options = {}) {
   // bubble), retract the parallel QQ approval so its card can't still be acted
   // on. No-op when QQ itself resolved (entry already removed from the bridge).
   cancelQQApproval(permEntry);
+  cancelWechatApproval(permEntry);
 
   // Minimum display time: if bubble just appeared and dismiss is automatic
   // (client disconnect / terminal answer), delay so user can see it briefly
@@ -1825,6 +1893,7 @@ function dismissInteractivePermissionWithoutDecision(perm, reason) {
   }
   cancelRemoteApproval(perm);
   cancelQQApproval(perm);
+  cancelWechatApproval(perm);
   if (perm._delayTimer) { clearTimeout(perm._delayTimer); perm._delayTimer = null; }
   if (perm.autoCloseTimer) { clearTimeout(perm.autoCloseTimer); perm.autoCloseTimer = null; }
   if (perm.abortHandler && perm.res) {
@@ -1962,6 +2031,8 @@ return {
   maybeStartRemoteApproval,
   maybeStartRemoteQQApproval,
   maybeStartRemoteQQElicitation,
+  maybeStartRemoteWechatApproval,
+  maybeStartRemoteWechatElicitation,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,

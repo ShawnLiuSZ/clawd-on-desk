@@ -35,6 +35,10 @@ const {
   normalizeQQBot,
 } = require("./qq-bot-settings");
 const {
+  cloneDefaultWechatBot,
+  normalizeWechatBot,
+} = require("./wechat-bot-settings");
+const {
   NOTIFICATION_DEFAULT_SECONDS,
   UPDATE_DEFAULT_SECONDS,
   PERMISSION_DEFAULT_SECONDS,
@@ -296,6 +300,11 @@ const SCHEMA = {
     type: "object",
     defaultFactory: () => cloneDefaultQQBot(),
     normalize: normalizeQQBot,
+  },
+  wechatBot: {
+    type: "object",
+    defaultFactory: () => cloneDefaultWechatBot(),
+    normalize: normalizeWechatBot,
   },
   // v0.9.0 migration state. transport defaults to null (undecided) so v0.8.x
   // users upgrading without this key fall onto the "detect legacy artefacts"

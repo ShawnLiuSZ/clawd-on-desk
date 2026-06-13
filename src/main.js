@@ -32,6 +32,9 @@ const { createTelegramSidecarStatusBridge } = require("./telegram-sidecar-status
 const { createQQBotClient } = require("./qq-bot-client");
 const { createQQApprovalBridge } = require("./qq-approval");
 const { normalizeQQBot } = require("./qq-bot-settings");
+const { createWechatIlinkClient } = require("./wechat-ilink-client");
+const { createWechatApprovalBridge } = require("./wechat-approval");
+const { normalizeWechatBot } = require("./wechat-bot-settings");
 const WebSocket = require("ws");
 const initUpdateBubble = require("./update-bubble");
 const { registerUpdateBubbleIpc } = initUpdateBubble;
@@ -289,6 +292,9 @@ const _settingsController = createSettingsController({
     sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     deleteTelegramApprovalTokenFile: () => deleteTelegramApprovalTokenFile(),
     testQQBotConnection: () => testQQBotConnection(),
+    testWechatBotConnection: () => testWechatBotConnection(),
+    getWechatQrcode: () => getWechatQrcode(),
+    pollWechatQrcodeStatus: (key) => pollWechatQrcodeStatus(key),
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1210,6 +1216,89 @@ async function testQQBotConnection() {
   }
 }
 
+let _wechatClient = null;
+let _wechatApprovalBridge = null;
+
+function getOrCreateWechatClient() {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (!wxConfig || !wxConfig.enabled) {
+    _wechatClient = null;
+    return null;
+  }
+  const normalized = normalizeWechatBot(wxConfig);
+  if (_wechatClient) {
+    _wechatClient.updateConfig(normalized);
+    return _wechatClient;
+  }
+  _wechatClient = createWechatIlinkClient(normalized, { log: console.log });
+  // Start long-polling immediately so the approval bridge can discover
+  // from_user_id and context_token from the first user message.
+  _wechatClient.startPolling().catch((err) => {
+    console.log(`wechat-ilink: poll start failed — ${err && err.message ? err.message : String(err)}`);
+  });
+  return _wechatClient;
+}
+
+function getOrCreateWechatApprovalBridge() {
+  if (_wechatApprovalBridge) return _wechatApprovalBridge;
+  const client = getOrCreateWechatClient();
+  if (!client) return null;
+  _wechatApprovalBridge = createWechatApprovalBridge(client, { log: console.log });
+  try { _wechatApprovalBridge.start(); } catch (err) {
+    console.log(`wechat-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
+  }
+  return _wechatApprovalBridge;
+}
+
+
+async function testWechatBotConnection() {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (!wxConfig || !wxConfig.enabled) {
+    return { status: "error", message: "WeChat Bot is not enabled" };
+  }
+  const normalized = normalizeWechatBot(wxConfig);
+  if (!normalized.token) {
+    return { status: "error", message: "WeChat Bot token is not configured" };
+  }
+  const client = getOrCreateWechatClient();
+  if (!client) {
+    return { status: "error", message: "WeChat Bot client failed to initialize" };
+  }
+  if (!client.isConfigured()) {
+    return { status: "error", message: "WeChat Bot configuration is incomplete" };
+  }
+  if (client.isConnected()) {
+    return { status: "ok", message: "WeChat Bot is connected and polling for messages." };
+  }
+  return { status: "ok", message: "WeChat Bot is configured. Long-polling will connect on next message cycle." };
+}
+
+async function getWechatQrcode() {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  const config = normalizeWechatBot(wxConfig || {});
+  try {
+    const { fetchQrcode } = require("./wechat-ilink-client");
+    const result = await fetchQrcode(config.baseUrl);
+    console.log("wechat-qrcode: loginUrl:", result.loginUrl);
+    return { status: "ok", qrcodeImg: result.qrcodeImg, loginUrl: result.loginUrl, qrcode: result.qrcode };
+  } catch (err) {
+    console.log("wechat-qrcode: fetch failed:", err && err.message);
+    return { status: "error", message: err && err.message ? err.message : "Failed to get QR code" };
+  }
+}
+
+async function pollWechatQrcodeStatus(qrcodeKey) {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  const config = normalizeWechatBot(wxConfig || {});
+  try {
+    const { pollQrcodeStatus: doPoll } = require("./wechat-ilink-client");
+    const result = await doPoll(qrcodeKey, config.baseUrl);
+    return result;
+  } catch (err) {
+    return { status: "error", message: err && err.message ? err.message : "QR code polling failed" };
+  }
+}
+
 const _permCtx = {
   get win() { return win; },
   get lang() { return lang; },
@@ -1256,6 +1345,12 @@ const _permCtx = {
     const qqConfig = _settingsController.get("qqBot");
     return qqConfig ? normalizeQQBot(qqConfig) : null;
   },
+  getWechatApprovalBridge: () => getOrCreateWechatApprovalBridge(),
+  getWechatBotConfig: () => {
+    if (!_settingsController) return null;
+    const wxConfig = _settingsController.get("wechatBot");
+    return wxConfig ? normalizeWechatBot(wxConfig) : null;
+  },
   onPermissionsChanged: () => {
     if (hardwareBuddyAdapter) hardwareBuddyAdapter.notifyPermissionsChanged();
   },
@@ -1265,7 +1360,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, maybeStartRemoteQQElicitation, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteQQApproval, maybeStartRemoteQQElicitation, maybeStartRemoteWechatApproval, maybeStartRemoteWechatElicitation, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -1692,6 +1787,8 @@ const _serverCtx = {
   maybeStartRemoteApproval,
   maybeStartRemoteQQApproval,
   maybeStartRemoteQQElicitation,
+  maybeStartRemoteWechatApproval,
+  maybeStartRemoteWechatElicitation,
   replyOpencodePermission,
   permLog,
 };
@@ -2964,6 +3061,24 @@ _settingsController.subscribeKey("qqBot", () => {
   const qqConfig = _settingsController ? _settingsController.get("qqBot") : null;
   if (qqConfig && qqConfig.enabled) {
     getOrCreateQQBotClient();
+  }
+}
+_settingsController.subscribeKey("wechatBot", () => {
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (wxConfig && wxConfig.enabled) {
+    getOrCreateWechatClient();
+  } else {
+    if (_wechatClient) {
+      _wechatClient.disconnect();
+      _wechatClient = null;
+    }
+  }
+});
+// Startup: if WeChat Bot was already enabled, start long-polling now.
+{
+  const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
+  if (wxConfig && wxConfig.enabled) {
+    getOrCreateWechatClient();
   }
 }
 _settingsController.subscribeKey("mobilePreviewEnabled", async (enabled) => {
