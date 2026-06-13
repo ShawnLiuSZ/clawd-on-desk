@@ -212,6 +212,8 @@ describe("server-route-permission POST", () => {
       source_pid: 456,
       agent_pid: 456,
       pid_chain: [789, 456, -1],
+      tmux_socket: "/tmp/tmux-1000/work",
+      tmux_client: "/dev/pts/7",
       cwd: "/repo",
       platform: "webui",
       model: "gpt-5.4",
@@ -228,6 +230,8 @@ describe("server-route-permission POST", () => {
     assert.strictEqual(entry.sourcePid, 456);
     assert.strictEqual(entry.agentPid, 456);
     assert.deepStrictEqual(entry.pidChain, [789, 456]);
+    assert.strictEqual(entry.tmuxSocket, "/tmp/tmux-1000/work");
+    assert.strictEqual(entry.tmuxClient, "/dev/pts/7");
     assert.strictEqual(entry.cwd, "/repo");
     assert.strictEqual(entry.platform, "webui");
     assert.strictEqual(entry.model, "gpt-5.4");
@@ -243,6 +247,8 @@ describe("server-route-permission POST", () => {
         sourcePid: 456,
         agentPid: 456,
         pidChain: [789, 456],
+        tmuxSocket: "/tmp/tmux-1000/work",
+        tmuxClient: "/dev/pts/7",
         cwd: "/repo",
         platform: "webui",
         model: "gpt-5.4",
