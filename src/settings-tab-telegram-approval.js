@@ -997,8 +997,8 @@
       className: "remote-approval-channel-card tg-approval-channel-card",
       children: [
         buildQQBotStatusRow(cfg, statusKind),
-        helpers.buildSection("AppID / AppSecret", [buildQQBotAppIdRow(cfg), buildQQBotAppSecretRow()]),
-        helpers.buildSection("Enable / Test", [buildQQBotEnabledRow(cfg, ready), buildQQBotOpenidRow(cfg, ready), buildQQBotTestRow(cfg, ready)]),
+        helpers.buildSection(t("qqBotSectionAppId"), [buildQQBotAppIdRow(cfg), buildQQBotAppSecretRow()]),
+        helpers.buildSection(t("enableTestSection"), [buildQQBotEnabledRow(cfg, ready), buildQQBotOpenidRow(cfg, ready), buildQQBotTestRow(cfg, ready)]),
       ],
     });
   }
@@ -1015,7 +1015,7 @@
 
     const nameEl = document.createElement("span");
     nameEl.className = "tg-approval-channel-name";
-    nameEl.textContent = "QQ Bot";
+    nameEl.textContent = t("qqBot");
     wrap.appendChild(nameEl);
 
     const badge = document.createElement("span");
@@ -1037,11 +1037,11 @@
     const text = document.createElement("span");
     text.className = "tg-approval-channel-status-text";
     if (!cfg.appId) {
-      text.textContent = "Not configured — enter your AppID below.";
+      text.textContent = t("qqBotStatusNotConfigured");
     } else if (!cfg.appSecretConfigured) {
-      text.textContent = "AppID configured. Enter AppSecret to activate.";
+      text.textContent = t("qqBotStatusAppIdOnly");
     } else {
-      text.textContent = "Configured: AppID " + cfg.appId.slice(0, 6) + "…, secret is set.";
+      text.textContent = t("qqBotStatusConfigured").replace("{id}", cfg.appId.slice(0, 6));
     }
     row.appendChild(text);
     return row;
@@ -1055,10 +1055,10 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label";
-    label.textContent = "AppID";
+    label.textContent = t("qqBotAppId");
     const desc = document.createElement("span");
     desc.className = "row-desc";
-    desc.textContent = "Your QQ Bot AppID from q.qq.com.";
+    desc.textContent = t("qqBotAppIdDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1084,7 +1084,7 @@
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "soft-btn accent";
-    saveBtn.textContent = "Save";
+    saveBtn.textContent = t("save");
     saveBtn.addEventListener("click", () => {
       const val = String(input.value || "").trim();
       if (!val) return;
@@ -1111,10 +1111,10 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label tg-approval-token-stored-label";
-    label.textContent = "AppSecret is configured";
+    label.textContent = t("qqBotAppSecretStored");
     const desc = document.createElement("span");
     desc.className = "row-desc";
-    desc.textContent = "The secret is stored locally. Click Replace to update it.";
+    desc.textContent = t("qqBotAppSecretStoredDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1124,7 +1124,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "soft-btn";
-    btn.textContent = "Replace Secret";
+    btn.textContent = t("qqBotReplaceSecret");
     btn.addEventListener("click", () => {
       view.qqBotEditing = true;
       view.qqBotDraft = { value: "" };
@@ -1146,12 +1146,12 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label";
-    label.textContent = "AppSecret";
+    label.textContent = t("qqBotAppSecret");
     const desc = document.createElement("span");
     desc.className = "row-desc";
     desc.textContent = cfg.appSecretConfigured
-      ? "Enter a new secret to replace the current one."
-      : "Your QQ Bot AppSecret from q.qq.com.";
+      ? t("qqBotAppSecretReplaceDescription")
+      : t("qqBotAppSecretDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1162,7 +1162,7 @@
     input.type = "password";
     input.autocomplete = "off";
     input.spellcheck = false;
-    input.placeholder = cfg.appSecretConfigured ? "Leave blank to keep current" : "Paste AppSecret here";
+    input.placeholder = cfg.appSecretConfigured ? t("qqBotSecretPlaceholderKeep") : t("qqBotSecretPlaceholderNew");
     input.className = "tg-approval-input";
     input.value = draft.value;
     input.addEventListener("input", () => {
@@ -1173,7 +1173,7 @@
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "soft-btn accent";
-    saveBtn.textContent = "Save";
+    saveBtn.textContent = t("save");
     saveBtn.addEventListener("click", () => {
       const val = String(draft.value || "").trim();
       if (!val) return;
@@ -1189,7 +1189,7 @@
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
       cancelBtn.className = "soft-btn";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = t("cancel");
       cancelBtn.addEventListener("click", () => {
         view.qqBotEditing = false;
         view.qqBotDraft = null;
@@ -1212,10 +1212,10 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label";
-    label.textContent = "Enabled";
+    label.textContent = t("qqBotEnabledLabel");
     const desc = document.createElement("span");
     desc.className = "row-desc";
-    desc.textContent = "Enable QQ Bot for remote approval.";
+    desc.textContent = t("qqBotEnabledDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1259,12 +1259,12 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label";
-    label.textContent = "User OpenID";
+    label.textContent = t("qqBotUserOpenid");
     const desc = document.createElement("span");
     desc.className = "row-desc";
     desc.textContent = hasOpenid
-      ? "OpenID is configured."
-      : "Auto-discovered when you message the bot via QQ, or enter manually.";
+      ? t("qqBotOpenidConfigured")
+      : t("qqBotOpenidDescription");
     text.appendChild(label);
     text.appendChild(desc);
     if (hasOpenid) {
@@ -1280,7 +1280,7 @@
     const input = document.createElement("input");
     input.type = "text";
     input.spellcheck = false;
-    input.placeholder = hasOpenid ? current.userOpenid.slice(0, 12) + "…" : "Paste OpenID or leave blank";
+    input.placeholder = hasOpenid ? current.userOpenid.slice(0, 12) + "…" : t("qqBotOpenidPlaceholder");
     input.className = "tg-approval-input";
     input.addEventListener("change", () => {
       const val = String(input.value || "").trim();
@@ -1291,7 +1291,7 @@
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "soft-btn accent";
-    saveBtn.textContent = "Save";
+    saveBtn.textContent = t("save");
     saveBtn.addEventListener("click", () => {
       const val = String(input.value || "").trim();
       if (!val) return;
@@ -1312,10 +1312,10 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label";
-    label.textContent = "Test Connection";
+    label.textContent = t("qqBotTestConnection");
     const desc = document.createElement("span");
     desc.className = "row-desc";
-    desc.textContent = "Send the bot a C2C message first to auto-discover your OpenID, then test the connection.";
+    desc.textContent = t("qqBotTestDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1325,7 +1325,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "soft-btn accent";
-    btn.textContent = view.qqBotTestPending ? "Testing…" : "Test Connection";
+    btn.textContent = view.qqBotTestPending ? t("buttonTesting") : t("qqBotTestConnection");
     btn.disabled = testDisabled;
     btn.addEventListener("click", () => {
       if (testDisabled) return;
@@ -1337,9 +1337,9 @@
         view.qqBotTestResult = result;
         ops.requestRender({ content: true });
         if (result && result.status === "ok") {
-          ops.showToast("QQ Bot connection test passed.");
+          ops.showToast(t("qqBotTestSuccess"));
         } else {
-          ops.showToast((result && result.message) || "QQ Bot test failed", { error: true });
+          ops.showToast((result && result.message) || t("qqBotTestFailed"), { error: true });
         }
       });
     });
@@ -1349,7 +1349,7 @@
     if (view.qqBotTestResult && view.qqBotTestResult.status !== "ok") {
       const errEl = document.createElement("div");
       errEl.className = "form-error";
-      errEl.textContent = view.qqBotTestResult.message || "Unknown error";
+      errEl.textContent = view.qqBotTestResult.message || t("unknownError");
       row.appendChild(errEl);
     }
 
@@ -1367,7 +1367,7 @@
       if (!result || result.status !== "ok") {
         ops.showToast((result && result.message) || t("toastSaveFailed"), { error: true });
       } else {
-        ops.showToast("QQ Bot config saved.");
+        ops.showToast(t("qqBotConfigSaved"));
       }
       ops.requestRender({ content: true });
     }).catch((err) => {
@@ -1404,7 +1404,7 @@
       children: [
         buildWechatBotStatusRow(cfg, statusKind),
         helpers.buildSection(t("wechatBotToken"), [buildWechatBotTokenRow(cfg)]),
-        helpers.buildSection("Enable / Test", [buildWechatBotEnabledRow(cfg), buildWechatBotTestRow(cfg)]),
+        helpers.buildSection(t("enableTestSection"), [buildWechatBotEnabledRow(cfg), buildWechatBotTestRow(cfg)]),
       ],
     });
   }
@@ -1437,9 +1437,9 @@
     const text = document.createElement("span");
     text.className = "tg-approval-channel-status-text";
     if (!cfg.token) {
-      text.textContent = "Not configured — login via QR code or paste your Bearer token below.";
+      text.textContent = t("wechatBotStatusNotConfigured");
     } else {
-      text.textContent = "Token configured. Ready to receive approval requests.";
+      text.textContent = t("wechatBotStatusConfigured");
     }
     row.appendChild(text);
     return row;
@@ -1460,10 +1460,10 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label tg-approval-token-stored-label";
-    label.textContent = "Token is configured";
+    label.textContent = t("wechatBotTokenStored");
     const desc = document.createElement("span");
     desc.className = "row-desc";
-    desc.textContent = "Your ilink Bearer token is stored locally. Click Replace to update it.";
+    desc.textContent = t("wechatBotTokenStoredDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1473,7 +1473,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "soft-btn";
-    btn.textContent = "Replace Token";
+    btn.textContent = t("wechatBotReplaceToken");
     btn.addEventListener("click", () => {
       view.wechatBotEditing = true;
       ops.requestRender({ content: true });
@@ -1495,8 +1495,8 @@
     const desc = document.createElement("span");
     desc.className = "row-desc";
     desc.textContent = cfg.token
-      ? "Enter a new token to replace the current one."
-      : "Paste your ilink Bearer token, or login via QR code below.";
+      ? t("wechatBotTokenReplaceDescription")
+      : t("wechatBotTokenDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1507,7 +1507,7 @@
     input.type = "password";
     input.autocomplete = "off";
     input.spellcheck = false;
-    input.placeholder = cfg.token ? "Leave blank to keep current" : "Paste ilink Bearer token";
+    input.placeholder = cfg.token ? t("wechatBotTokenPlaceholderKeep") : t("wechatBotTokenPlaceholderNew");
     input.className = "tg-approval-input";
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
@@ -1523,7 +1523,7 @@
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "soft-btn accent";
-    saveBtn.textContent = "Save";
+    saveBtn.textContent = t("save");
     saveBtn.addEventListener("click", () => {
       const val = String(input.value || "").trim();
       if (!val) return;
@@ -1539,7 +1539,7 @@
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
       cancelBtn.className = "soft-btn";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = t("cancel");
       cancelBtn.addEventListener("click", () => {
         view.wechatBotEditing = false;
         ops.requestRender({ content: true });
@@ -1561,17 +1561,17 @@
       qrText.className = "row-text";
       const qrLabel = document.createElement("span");
       qrLabel.className = "row-label";
-      qrLabel.textContent = "Login with QR Code";
+      qrLabel.textContent = t("wechatBotQrLogin");
       const qrDesc = document.createElement("span");
       qrDesc.className = "row-desc";
       if (cfg.token && view.wechatBotEditing) {
         qrDesc.textContent = view.wechatBotQrcodeImage
-          ? "Scan to replace your current token."
-          : "Generate a new QR code to replace your current token.";
+          ? t("wechatBotQrReplaceScan")
+          : t("wechatBotQrReplaceGenerate");
       } else {
         qrDesc.textContent = view.wechatBotQrcodeImage
-          ? "Scan the QR code with WeChat to login."
-          : "Click the button below to generate a WeChat login QR code.";
+          ? t("wechatBotQrLoginScan")
+          : t("wechatBotQrLoginGenerate");
       }
       qrText.appendChild(qrLabel);
       qrText.appendChild(qrDesc);
@@ -1588,7 +1588,7 @@
 
         const img = document.createElement("img");
         img.src = view.wechatBotQrcodeImage;
-        img.alt = "WeChat Login QR Code";
+        img.alt = t("wechatBotQrImageAlt");
         img.style.width = "200px";
         img.style.height = "200px";
         img.style.borderRadius = "8px";
@@ -1597,7 +1597,7 @@
 
         const hint = document.createElement("span");
         hint.className = "row-desc";
-        hint.textContent = "Scan the QR code with WeChat on your phone to login.";
+        hint.textContent = t("wechatBotQrScanHint");
         hint.style.textAlign = "center";
         qrImgRow.appendChild(hint);
 
@@ -1621,7 +1621,7 @@
       const qrBtn = document.createElement("button");
       qrBtn.type = "button";
       qrBtn.className = "soft-btn accent";
-      qrBtn.textContent = view.wechatBotQrcodePending ? "Generating QR code…" : "Get QR Code";
+      qrBtn.textContent = view.wechatBotQrcodePending ? t("wechatBotGeneratingQr") : t("wechatBotGetQr");
       qrBtn.disabled = view.wechatBotQrcodePending;
       qrBtn.addEventListener("click", () => {
         startWechatQrcodeLogin();
@@ -1632,7 +1632,7 @@
         const cancelQrBtn = document.createElement("button");
         cancelQrBtn.type = "button";
         cancelQrBtn.className = "soft-btn";
-        cancelQrBtn.textContent = "Cancel QR Login";
+        cancelQrBtn.textContent = t("wechatBotCancelQrLogin");
         cancelQrBtn.addEventListener("click", () => {
           cancelWechatQrcodeLogin();
         });
@@ -1666,7 +1666,7 @@
     callCommand("wechatBot.getQrcode").then((result) => {
       view.wechatBotQrcodePending = false;
       if (!result || result.status !== "ok" || !result.qrcode) {
-        view.wechatBotQrcodeError = (result && result.message) || "Failed to get QR code";
+        view.wechatBotQrcodeError = (result && result.message) || t("wechatBotGetQrFailed");
         ops.requestRender({ content: true });
         return;
       }
@@ -1678,7 +1678,7 @@
       pollWechatQrcodeStatus();
     }).catch((err) => {
       view.wechatBotQrcodePending = false;
-      view.wechatBotQrcodeError = err && err.message ? err.message : "Failed to get QR code";
+      view.wechatBotQrcodeError = err && err.message ? err.message : t("wechatBotGetQrFailed");
       ops.requestRender({ content: true });
     });
   }
@@ -1695,7 +1695,7 @@
         cancelWechatQrcodeLogin();
         view.wechatBotEditing = false;
         ops.requestRender({ content: true });
-        ops.showToast("WeChat login successful!");
+        ops.showToast(t("wechatBotLoginSuccess"));
         return;
       }
 
@@ -1705,13 +1705,13 @@
           pollWechatQrcodeStatus();
         }, 1500);
       } else if (result.status === "error") {
-        view.wechatBotQrcodeError = result.message || "QR code expired or login failed";
+        view.wechatBotQrcodeError = result.message || t("wechatBotQrError");
         view.wechatBotQrcodeImage = null;
         view.wechatBotQrcodeUrl = null;
         view.wechatBotQrcodeKey = null;
         ops.requestRender({ content: true });
       } else if (result.status === "timeout") {
-        view.wechatBotQrcodeError = "QR code expired. Please generate a new one.";
+        view.wechatBotQrcodeError = t("wechatBotQrTimeout");
         view.wechatBotQrcodeImage = null;
         view.wechatBotQrcodeUrl = null;
         view.wechatBotQrcodeKey = null;
@@ -1745,7 +1745,7 @@
     text.className = "row-text";
     const label = document.createElement("span");
     label.className = "row-label";
-    label.textContent = "Enabled";
+    label.textContent = t("wechatBotEnabledLabel");
     const desc = document.createElement("span");
     desc.className = "row-desc";
     desc.textContent = t("wechatBotApprovalEnabledDescription");
@@ -1796,7 +1796,7 @@
     label.textContent = t("wechatBotTestConnection");
     const desc = document.createElement("span");
     desc.className = "row-desc";
-    desc.textContent = "Verify that the WeChat Bot can connect to the ilink gateway.";
+    desc.textContent = t("wechatBotTestDescription");
     text.appendChild(label);
     text.appendChild(desc);
     row.appendChild(text);
@@ -1806,7 +1806,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "soft-btn accent";
-    btn.textContent = view.wechatBotTestPending ? "Testing…" : t("wechatBotTestConnection");
+    btn.textContent = view.wechatBotTestPending ? t("buttonTesting") : t("wechatBotTestConnection");
     btn.disabled = testDisabled;
     btn.addEventListener("click", () => {
       if (testDisabled) return;
@@ -1830,7 +1830,7 @@
     if (view.wechatBotTestResult && view.wechatBotTestResult.status !== "ok") {
       const errEl = document.createElement("div");
       errEl.className = "form-error";
-      errEl.textContent = view.wechatBotTestResult.message || "Unknown error";
+      errEl.textContent = view.wechatBotTestResult.message || t("unknownError");
       row.appendChild(errEl);
     }
 
@@ -1852,7 +1852,7 @@
       if (!result || result.status !== "ok") {
         ops.showToast((result && result.message) || t("toastSaveFailed"), { error: true });
       } else {
-        ops.showToast("WeChat Bot config saved.");
+        ops.showToast(t("wechatBotConfigSaved"));
       }
       ops.requestRender({ content: true });
     }).catch((err) => {
