@@ -1290,6 +1290,26 @@ async function testQQBotConnection() {
 
 let _wechatClient = null;
 let _wechatApprovalBridge = null;
+let _wechatTargetListenerInstalled = false;
+
+// Persist the auto-discovered WeChat target (userId + contextToken) so approval
+// sends survive a restart without the user re-messaging the bot. Mirrors
+// persistQQBotOpenidToSettings. Skips redundant writes when nothing changed.
+function persistWechatTargetToSettings(target) {
+  if (!_settingsController || !target || !target.userId) return;
+  const current = _settingsController.get("wechatBot");
+  if (!current || !current.enabled) return;
+  if (current.userId === target.userId && current.contextToken === (target.contextToken || "")) return;
+  try {
+    _settingsController.applyUpdate("wechatBot", {
+      ...(current || {}),
+      userId: target.userId,
+      contextToken: target.contextToken || "",
+    });
+  } catch (err) {
+    console.log(`wechat-ilink: persist target failed — ${err && err.message ? err.message : String(err)}`);
+  }
+}
 
 function getOrCreateWechatClient() {
   const wxConfig = _settingsController ? _settingsController.get("wechatBot") : null;
@@ -1303,6 +1323,10 @@ function getOrCreateWechatClient() {
     return _wechatClient;
   }
   _wechatClient = createWechatIlinkClient(normalized, { log: console.log });
+  if (!_wechatTargetListenerInstalled && typeof _wechatClient.onTargetDiscovered === "function") {
+    _wechatClient.onTargetDiscovered((target) => persistWechatTargetToSettings(target));
+    _wechatTargetListenerInstalled = true;
+  }
   // Start long-polling immediately so the approval bridge can discover
   // from_user_id and context_token from the first user message.
   _wechatClient.startPolling().catch((err) => {

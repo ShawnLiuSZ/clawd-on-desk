@@ -7,6 +7,11 @@ const DEFAULT_WECHAT_BOT = Object.freeze({
   approvalTimeoutMs: 300000,
   baseUrl: "https://ilinkai.weixin.qq.com",
   accountId: "default",
+  // Auto-discovered from the first inbound message and persisted so approval
+  // sends survive a restart without the user re-messaging the bot. Mirrors the
+  // QQ Bot userOpenid anchor. contextToken refreshes on every inbound message.
+  userId: "",
+  contextToken: "",
 });
 
 function isPlainObject(value) {
@@ -33,6 +38,8 @@ function normalizeWechatBot(value, defaultsValue = DEFAULT_WECHAT_BOT) {
       : DEFAULT_WECHAT_BOT.approvalTimeoutMs,
     baseUrl: trimString(defaults.baseUrl, 512) || DEFAULT_WECHAT_BOT.baseUrl,
     accountId: trimString(defaults.accountId, 256) || DEFAULT_WECHAT_BOT.accountId,
+    userId: trimString(defaults.userId, 256),
+    contextToken: trimString(defaults.contextToken, 4096),
   };
   if (!isPlainObject(value)) return out;
   if (typeof value.enabled === "boolean") out.enabled = value.enabled;
@@ -48,6 +55,12 @@ function normalizeWechatBot(value, defaultsValue = DEFAULT_WECHAT_BOT) {
     const candidate = trimString(value.accountId, 256);
     if (candidate) out.accountId = candidate;
   }
+  if (typeof value.userId === "string") {
+    out.userId = trimString(value.userId, 256);
+  }
+  if (typeof value.contextToken === "string") {
+    out.contextToken = trimString(value.contextToken, 4096);
+  }
   if (Number.isFinite(value.approvalTimeoutMs) && value.approvalTimeoutMs > 0) {
     out.approvalTimeoutMs = Math.min(value.approvalTimeoutMs, 600000);
   }
@@ -61,6 +74,7 @@ function validateWechatBot(value) {
   for (const key of Object.keys(value)) {
     if (![
       "enabled", "token", "approvalEnabled", "approvalTimeoutMs", "baseUrl", "accountId",
+      "userId", "contextToken",
     ].includes(key)) {
       return { status: "error", message: `wechatBot.${key} is not supported` };
     }
@@ -79,6 +93,12 @@ function validateWechatBot(value) {
   }
   if (value.accountId !== undefined && typeof value.accountId !== "string") {
     return { status: "error", message: "wechatBot.accountId must be a string" };
+  }
+  if (value.userId !== undefined && typeof value.userId !== "string") {
+    return { status: "error", message: "wechatBot.userId must be a string" };
+  }
+  if (value.contextToken !== undefined && typeof value.contextToken !== "string") {
+    return { status: "error", message: "wechatBot.contextToken must be a string" };
   }
   if (value.approvalTimeoutMs !== undefined) {
     if (!Number.isFinite(value.approvalTimeoutMs) || value.approvalTimeoutMs <= 0) {

@@ -372,6 +372,13 @@ function createLarkApprovalBridge(larkBotClient, options = {}) {
         if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
         pendingApprovals.delete(permId);
         if (entry.shortCode) shortCodeToPermId.delete(entry.shortCode);
+        // Another channel (desktop bubble / terminal / QQ / WeChat) resolved it
+        // first — post a notice so the now-stale Lark card isn't mistaken for
+        // actionable, matching the QQ/WeChat cross-channel behaviour. A later tap
+        // on the stale card is already a no-op (entry gone).
+        if (typeof larkBotClient.sendTextMessage === "function") {
+          larkBotClient.sendTextMessage(`☑️ 请求 [${entry.shortCode || ""}] 已在其他渠道处理`).catch(() => {});
+        }
         logFn(`lark-approval: cancelled permId=${permId}`);
         return true;
       }

@@ -163,11 +163,13 @@ function createWechatIlinkClient(config, options = {}) {
   let baseUrl = config.baseUrl || DEFAULT_BASE_URL;
   let enabled = config.enabled !== false;
 
-  // Long-poll state
+  // Long-poll state. userId/contextToken are restored from persisted settings so
+  // approval sends work after a restart without the user re-messaging the bot;
+  // both are refreshed whenever a newer inbound message arrives.
   let getUpdatesBuf = "";
-  let contextToken = "";
+  let contextToken = config.contextToken || "";
   let botUserId = "";
-  let lastFromUserId = "";
+  let lastFromUserId = config.userId || "";
   let longPollAbortController = null;
   let reconnectTimer = null;
   let reconnectAttempts = 0;
@@ -175,11 +177,17 @@ function createWechatIlinkClient(config, options = {}) {
 
   const messageListeners = new Set();
   const textMessageListeners = new Set();
+  const targetListeners = new Set();
 
   function updateConfig(newConfig) {
     if (newConfig.token !== undefined) token = String(newConfig.token || "");
     if (newConfig.baseUrl !== undefined) baseUrl = String(newConfig.baseUrl || "") || DEFAULT_BASE_URL;
     if (newConfig.enabled !== undefined) enabled = newConfig.enabled === true;
+    // Restore persisted target/context only when we have nothing in memory yet —
+    // a live message is always fresher than a settings round-trip, so never let
+    // a config save clobber a value we just discovered.
+    if (!lastFromUserId && newConfig.userId) lastFromUserId = String(newConfig.userId);
+    if (!contextToken && newConfig.contextToken) contextToken = String(newConfig.contextToken);
   }
 
   function isConfigured() {
@@ -345,6 +353,19 @@ function createWechatIlinkClient(config, options = {}) {
     // only ever records a real user. Mirrors QQ's client-level openid capture.
     if (fromUserId) lastFromUserId = fromUserId;
 
+    // Surface the discovered target so the host can persist it (userId +
+    // contextToken) and recover sends after a restart. Mirrors QQ's openid
+    // discovery callback.
+    if (fromUserId) {
+      for (const listener of targetListeners) {
+        try {
+          listener({ userId: fromUserId, contextToken });
+        } catch (err) {
+          logFn(`wechat-ilink: target listener error: ${compactLog(err, 100)}`);
+        }
+      }
+    }
+
     // Notify general message listeners
     for (const listener of messageListeners) {
       try {
@@ -435,6 +456,14 @@ function createWechatIlinkClient(config, options = {}) {
     return () => {};
   }
 
+  function onTargetDiscovered(callback) {
+    if (typeof callback === "function") {
+      targetListeners.add(callback);
+      return () => targetListeners.delete(callback);
+    }
+    return () => {};
+  }
+
   function disconnect() {
     stopPolling();
     reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
@@ -456,6 +485,7 @@ function createWechatIlinkClient(config, options = {}) {
     getLastFromUserId,
     onMessage,
     onTextMessage,
+    onTargetDiscovered,
     disconnect,
     isConnected,
     _testGenerateWechatUin: generateWechatUin,

@@ -328,4 +328,28 @@ describe("lark-approval: elicitation (multi-select)", () => {
     assert.strictEqual(resolved, null);
     assert.strictEqual(bridge.getPendingCount(), 1);
   });
+
+  it("cancelApproval posts a cross-channel notice with the short code", () => {
+    const sentTexts = [];
+    const mockClient = {
+      isEnabled: () => true,
+      sendCardMessage: () => Promise.resolve(),
+      sendTextMessage: (text) => { sentTexts.push(text); return Promise.resolve(); },
+      buildApprovalCard: (payload) => ({ mock: true, payload }),
+      buildConfirmationCard: (payload, behavior) => ({ mock: true, payload, behavior }),
+    };
+
+    const bridge = createLarkApprovalBridge(mockClient);
+    const permEntry = { toolName: "Bash", agentName: "claude-code", cwd: "/home/user", toolInput: { command: "ls" } };
+    bridge.requestApproval(permEntry, () => {});
+    const entry = bridge._testGetPendingApprovals().values().next().value;
+    const shortCode = entry.shortCode;
+
+    const cancelled = bridge.cancelApproval(permEntry);
+    assert.strictEqual(cancelled, true);
+    assert.strictEqual(bridge.getPendingCount(), 0);
+    assert.strictEqual(sentTexts.length, 1);
+    assert.ok(sentTexts[0].includes(shortCode), "notice should contain the short code");
+    assert.ok(sentTexts[0].includes("其他渠道"), "notice should say handled by another channel");
+  });
 });

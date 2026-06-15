@@ -1170,6 +1170,14 @@ function cancelWechatApproval(permEntry) {
 function maybeStartRemoteQQApproval(permEntry) {
   if (!isRemoteApprovalActionable(permEntry)) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  // Honor the live enable toggle. The cached bridge keeps a stale client whose
+  // isEnabled() ignores `enabled`, and disconnect() only closes the WS (cards
+  // still go out over HTTP) — so the authoritative gate is the current settings
+  // value here, read fresh on every request.
+  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
+    ? ctx.getQQBotConfig()
+    : (ctx.qqBotConfig || null);
+  if (!qqConfig || !qqConfig.enabled) return false;
   const bridge = getQQApprovalBridge();
   if (!bridge || typeof bridge.requestApproval !== "function") return false;
   // start() is idempotent and subscribes the button/text-reply listeners — it
@@ -1178,9 +1186,6 @@ function maybeStartRemoteQQApproval(permEntry) {
   if (typeof bridge.start === "function") {
     try { bridge.start(); } catch {}
   }
-  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
-    ? ctx.getQQBotConfig()
-    : (ctx.qqBotConfig || null);
   const resolveFn = (entry, behavior) => {
     if (pendingPermissions.indexOf(entry) === -1) return;
     resolvePermissionEntry(entry, behavior);
@@ -1197,14 +1202,18 @@ function maybeStartRemoteQQApproval(permEntry) {
 function maybeStartRemoteWechatApproval(permEntry) {
   if (!isRemoteApprovalActionable(permEntry)) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  // Honor the live enable toggle. The cached bridge can keep a stale client
+  // whose `enabled` was never flipped to false on disable, so gate on the
+  // current settings value read fresh on every request.
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  if (!wxConfig || !wxConfig.enabled) return false;
   const bridge = getWechatApprovalBridge();
   if (!bridge || typeof bridge.requestApproval !== "function") return false;
   if (typeof bridge.start === "function") {
     try { bridge.start(); } catch {}
   }
-  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
-    ? ctx.getWechatBotConfig()
-    : (ctx.wechatBotConfig || null);
   const resolveFn = (entry, behavior) => {
     if (pendingPermissions.indexOf(entry) === -1) return;
     resolvePermissionEntry(entry, behavior);
@@ -1221,14 +1230,15 @@ function maybeStartRemoteWechatApproval(permEntry) {
 function maybeStartRemoteQQElicitation(permEntry) {
   if (!permEntry || !permEntry.isElicitation) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
+    ? ctx.getQQBotConfig()
+    : (ctx.qqBotConfig || null);
+  if (!qqConfig || !qqConfig.enabled) return false;
   const bridge = getQQApprovalBridge();
   if (!bridge || typeof bridge.requestElicitation !== "function") return false;
   if (typeof bridge.start === "function") {
     try { bridge.start(); } catch {}
   }
-  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
-    ? ctx.getQQBotConfig()
-    : (ctx.qqBotConfig || null);
   const resolveFn = (entry, answers) => {
     if (pendingPermissions.indexOf(entry) === -1) return;
     entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, answers);
@@ -1246,14 +1256,15 @@ function maybeStartRemoteQQElicitation(permEntry) {
 function maybeStartRemoteWechatElicitation(permEntry) {
   if (!permEntry || !permEntry.isElicitation) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  if (!wxConfig || !wxConfig.enabled) return false;
   const bridge = getWechatApprovalBridge();
   if (!bridge || typeof bridge.requestElicitation !== "function") return false;
   if (typeof bridge.start === "function") {
     try { bridge.start(); } catch {}
   }
-  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
-    ? ctx.getWechatBotConfig()
-    : (ctx.wechatBotConfig || null);
   const resolveFn = (entry, answers) => {
     if (pendingPermissions.indexOf(entry) === -1) return;
     entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, answers);
@@ -1272,14 +1283,18 @@ function maybeStartRemoteLarkApproval(permEntry) {
   // Lark can render multi-select elicitation cards, so allow elicitation here.
   if (!isRemoteApprovalActionable(permEntry, { allowElicitation: true })) return false;
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  // Honor the live enable toggle. larkBotClient.isEnabled() only checks
+  // isConfigured() (ignores `enabled`), so the authoritative gate is the current
+  // settings value, read fresh on every request.
+  const larkConfig = (ctx.getLarkBotConfig && typeof ctx.getLarkBotConfig === "function")
+    ? ctx.getLarkBotConfig()
+    : (ctx.larkBotConfig || null);
+  if (!larkConfig || !larkConfig.enabled) return false;
   const bridge = getLarkApprovalBridge();
   if (!bridge || typeof bridge.requestApproval !== "function") return false;
   if (typeof bridge.start === "function") {
     try { bridge.start(); } catch {}
   }
-  const larkConfig = (ctx.getLarkBotConfig && typeof ctx.getLarkBotConfig === "function")
-    ? ctx.getLarkBotConfig()
-    : (ctx.larkBotConfig || null);
   const resolveFn = (entry, behavior) => {
     if (pendingPermissions.indexOf(entry) === -1) return;
     // Elicitation submit arrives as { type: "elicitation-submit", answers }.
