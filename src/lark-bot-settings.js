@@ -14,7 +14,8 @@ const DEFAULT_LARK_BOT = Object.freeze({
   enabled: false,
   appId: "",
   appSecret: "",
-  chatId: "",        // 目标群聊 ID 或用户 open_id
+  chatId: "",        // 目标群聊 ID 或用户 open_id（发送目标）
+  approverOpenId: "", // 授权审批人 open_id；群聊中仅此人可审批（自动绑定时捕获）
   region: REGION_FEISHU, // 默认使用飞书（国内）
   approvalEnabled: true,
   approvalTimeoutMs: 300000, // 5分钟超时
@@ -85,6 +86,7 @@ function normalizeLarkBot(value, defaultsValue = DEFAULT_LARK_BOT) {
     appId: trimString(defaults.appId, 64),
     appSecret: trimString(defaults.appSecret, 512),
     chatId: trimString(defaults.chatId, 64),
+    approverOpenId: trimString(defaults.approverOpenId, 64),
     region: normalizeRegion(defaults.region),
     approvalEnabled: defaults.approvalEnabled !== false,
     approvalTimeoutMs: Number.isFinite(defaults.approvalTimeoutMs) && defaults.approvalTimeoutMs > 0
@@ -114,6 +116,9 @@ function normalizeLarkBot(value, defaultsValue = DEFAULT_LARK_BOT) {
     const candidate = trimString(value.chatId, 64);
     out.chatId = isValidLarkChatId(candidate) ? candidate : "";
   }
+  if (typeof value.approverOpenId === "string") {
+    out.approverOpenId = trimString(value.approverOpenId, 64);
+  }
   if (typeof value.deviceUserOpenId === "string") {
     out.deviceUserOpenId = trimString(value.deviceUserOpenId, 64);
   }
@@ -138,7 +143,7 @@ function validateLarkBot(value) {
   }
   for (const key of Object.keys(value)) {
     if (![
-      "enabled", "appId", "appSecret", "chatId", "region",
+      "enabled", "appId", "appSecret", "chatId", "approverOpenId", "region",
       "approvalEnabled", "approvalTimeoutMs", "notifyStates", "minIntervalMs",
       "authMode", "deviceUserOpenId", "deviceUserName",
     ].includes(key)) {
@@ -159,6 +164,9 @@ function validateLarkBot(value) {
   }
   if (value.chatId !== undefined && typeof value.chatId !== "string") {
     return { status: "error", message: "larkBot.chatId must be a string" };
+  }
+  if (value.approverOpenId !== undefined && typeof value.approverOpenId !== "string") {
+    return { status: "error", message: "larkBot.approverOpenId must be a string" };
   }
   if (value.region !== undefined && !VALID_REGIONS.includes(value.region)) {
     return { status: "error", message: `larkBot.region must be one of: ${VALID_REGIONS.join(", ")}` };

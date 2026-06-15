@@ -111,6 +111,21 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
       permId = pendingApprovals.keys().next().value;
     }
     if (!permId) return;
+    // An elicitation card has no y/n meaning — the card advertises `y CODE`
+    // as "use default answers". Honour that by submitting a complete map of
+    // "Defer to agent" rather than resolving with an empty answer object.
+    const entry = pendingApprovals.get(permId);
+    if (entry && entry.isElicitation) {
+      const toolInput = entry.permEntry && entry.permEntry.toolInput;
+      const questions = (toolInput && Array.isArray(toolInput.questions)) ? toolInput.questions : [];
+      const answers = {};
+      for (const q of questions) {
+        if (q && typeof q.question === "string" && q.question) answers[q.question] = "Defer to agent";
+      }
+      logFn(`qq-approval: elicitation default-resolved via text reply permId=${permId}`);
+      resolveElicitationPending(entry, answers);
+      return;
+    }
     logFn(`qq-approval: resolved via text reply permId=${permId} behavior=${parsed.behavior}`);
     resolvePending(permId, parsed.behavior);
   }

@@ -47,6 +47,12 @@ describe("qq-bot-client: compactLog", () => {
     assert.ok(result.includes("<redacted>"));
   });
 
+  it("redacts QQBot scheme tokens (the scheme this client actually uses)", () => {
+    const result = compactLog("Authorization: QQBot abcdefghijklmnop1234567890");
+    assert.ok(!result.includes("abcdefghijkl"));
+    assert.ok(result.includes("<redacted>"));
+  });
+
   it("handles null/undefined", () => {
     assert.strictEqual(compactLog(null), "");
     assert.strictEqual(compactLog(undefined), "");

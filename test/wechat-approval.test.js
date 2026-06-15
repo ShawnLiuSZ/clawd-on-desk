@@ -407,3 +407,70 @@ describe("wechat-approval — bridge", () => {
     assert.strictEqual(resolved, "deny");
   });
 });
+
+describe("wechat-approval — sender authorization", () => {
+  // Helper: send an approval and return its short code.
+  function requestAndGetShortCode(bridge, sendCalls, onResolve) {
+    const permEntry = makePermEntry();
+    bridge.requestApproval(permEntry, onResolve, null);
+    const sentText = (sendCalls[0] && sendCalls[0].text) || "";
+    return (sentText.match(/\[([A-Z0-9]{4})\]/) || [])[1] || null;
+  }
+
+  it("ignores a text reply from an unauthorized sender", () => {
+    let resolved = null;
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      getLastFromUserId: () => "authorized_user",
+      sendTextMessage: async (text, target) => { sendCalls.push({ text, target }); return { status: 200 }; },
+    });
+    const bridge = createBridge(client, { getAuthorizedUserId: () => "authorized_user" });
+    bridge.start();
+
+    const shortCode = requestAndGetShortCode(bridge, sendCalls, (e, b) => { resolved = b; });
+    assert.ok(shortCode, "should include a short code");
+
+    // Attacker (different fromUserId) tries to approve.
+    bridge._testHandleTextMessage({ text: `y ${shortCode}`, fromUserId: "attacker" });
+    assert.strictEqual(resolved, null, "unauthorized sender must NOT resolve the approval");
+
+    // Authorized user can still approve.
+    bridge._testHandleTextMessage({ text: `y ${shortCode}`, fromUserId: "authorized_user" });
+    assert.strictEqual(resolved, "allow");
+  });
+
+  it("sends the approval to the authorized anchor, not a stale client target", () => {
+    // Simulates a lazily-created bridge where the client last captured an
+    // unauthorized sender. The approval card (and its short code) must go to
+    // the authorized user, never leak to the attacker.
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      getLastFromUserId: () => "attacker",
+      sendTextMessage: async (text, target) => { sendCalls.push({ text, target }); return { status: 200 }; },
+    });
+    const bridge = createBridge(client, { getAuthorizedUserId: () => "authorized_user" });
+    bridge.start();
+
+    requestAndGetShortCode(bridge, sendCalls, () => {});
+
+    assert.strictEqual(sendCalls[0].target, "authorized_user");
+  });
+
+  it("does not adopt an unauthorized sender as the send target", () => {
+    const sendCalls = [];
+    const client = makeMockWechatClient({
+      getLastFromUserId: () => "authorized_user",
+      sendTextMessage: async (text, target) => { sendCalls.push({ text, target }); return { status: 200 }; },
+    });
+    const bridge = createBridge(client, { getAuthorizedUserId: () => "authorized_user" });
+    bridge.start();
+
+    // Attacker chatter arrives before the approval is sent.
+    bridge._testHandleTextMessage({ text: "hello", fromUserId: "attacker" });
+
+    requestAndGetShortCode(bridge, sendCalls, () => {});
+
+    // The approval request must be delivered to the authorized user, not the attacker.
+    assert.strictEqual(sendCalls[0].target, "authorized_user");
+  });
+});

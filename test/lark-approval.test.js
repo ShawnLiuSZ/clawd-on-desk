@@ -329,6 +329,34 @@ describe("lark-approval: elicitation (multi-select)", () => {
     assert.strictEqual(bridge.getPendingCount(), 1);
   });
 
+  it("ignores a card tap from a different USER in the same authorized chat", () => {
+    // The headline group-chat hole: chat-level auth lets any member approve.
+    // With an authorized user wired, only that user's open_id may resolve.
+    const mockClient = {
+      isEnabled: () => true,
+      sendCardMessage: () => Promise.resolve(),
+      buildApprovalCard: (payload) => ({ mock: true, payload }),
+      buildConfirmationCard: (payload, behavior) => ({ mock: true, payload, behavior }),
+    };
+    const bridge = createLarkApprovalBridge(mockClient, {
+      getAuthorizedChatId: () => "oc_shared",
+      getAuthorizedUserId: () => "ou_owner",
+    });
+    let resolved = null;
+    bridge.requestApproval({ toolName: "Bash" }, (e, b) => { resolved = b; });
+    const permId = bridge._testGetPendingApprovals().keys().next().value;
+
+    // Intruder, same chat, different user → must be ignored.
+    const resp = bridge.handleCardCallback({ permId, action: "allow", chatId: "oc_shared", senderId: "ou_intruder" });
+    assert.strictEqual(resp, undefined);
+    assert.strictEqual(resolved, null);
+    assert.strictEqual(bridge.getPendingCount(), 1);
+
+    // The authorized user, same chat → resolves.
+    bridge.handleCardCallback({ permId, action: "allow", chatId: "oc_shared", senderId: "ou_owner" });
+    assert.strictEqual(resolved, "allow");
+  });
+
   it("cancelApproval posts a cross-channel notice with the short code", () => {
     const sentTexts = [];
     const mockClient = {

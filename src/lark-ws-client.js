@@ -40,15 +40,20 @@ function mapMessageEvent(data) {
   return { chatId, text, senderId };
 }
 
-// card.action.trigger → { permId, action, chatId }
+// card.action.trigger → { permId, action, chatId, senderId }
+// senderId is the tapping user's identity (operator open_id). It is REQUIRED
+// for user-level authorization: chat_id alone is shared by every member of a
+// group, so without the operator any member could approve another's request.
 function mapCardActionEvent(data) {
   const action = (data && data.action) || {};
   const value = action.value && typeof action.value === "object" ? action.value : {};
   const context = (data && data.context) || {};
+  const operator = (data && data.operator) || {};
   const permId = value.permId || value.perm_id || null;
   const behavior = value.action || value.behavior || null;
   const chatId = context.open_chat_id || data.open_chat_id || "";
-  return { permId, action: behavior, chatId };
+  const senderId = operator.open_id || operator.union_id || operator.user_id || "";
+  return { permId, action: behavior, chatId, senderId };
 }
 
 function createLarkWsClient(opts = {}) {

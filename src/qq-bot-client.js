@@ -44,7 +44,7 @@ function compactLog(text, maxLen = 200) {
   let t = String(text == null ? "" : text);
   t = t.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
   t = t.replace(/\b\d{6,20}\b/g, "<redacted:appid>");
-  t = t.replace(/\b(?:Bearer|Token)\s+[A-Za-z0-9._~+/=-]{12,}\b/gi, "Bearer <redacted>");
+  t = t.replace(/\b(?:Bearer|Token|QQBot)\s+[A-Za-z0-9._~+/=-]{12,}\b/gi, "Bearer <redacted>");
   if (t.length > maxLen) t = `${t.slice(0, Math.max(0, maxLen - 1))}…`;
   return t;
 }
@@ -523,11 +523,17 @@ function createQQBotClient(config, options = {}) {
     if (!interactionId) return;
     try {
       const token = await getToken();
-      await httpPutFn(
+      const res = await httpPutFn(
         `${getBaseUrl()}/interactions/${encodeURIComponent(interactionId)}`,
         { code: code || 0 },
         { headers: { Authorization: `QQBot ${token}` }, timeout: 5000 }
       );
+      // A non-2xx ack means the QQ client keeps spinning to "请求超时" — surface
+      // it instead of silently swallowing (an empty result counts as OK for
+      // injected fakes that return nothing).
+      if (res && res.status != null && (res.status < 200 || res.status >= 300)) {
+        logFn(`qq-bot: interaction ack non-2xx: status=${res.status} ${compactLog(res.body, 80)}`);
+      }
     } catch (err) {
       logFn(`qq-bot: interaction ack failed: ${compactLog(err, 100)}`);
     }

@@ -387,6 +387,31 @@ describe("qq-approval: requestElicitation", () => {
     assert.strictEqual(bridge.hasPending(), false);
   });
 
+  it("text reply 'y' on an elicitation submits default answers, not empty", () => {
+    // The card promises `y CODE` 使用默认答案; it must produce a complete
+    // answer map (every question → "Defer to agent"), not a bare behavior.
+    const client = makeMockQQBotClient();
+    const bridge = createBridge(client);
+    let resolvedAnswers = null;
+
+    const perm = makePermEntry({
+      toolInput: {
+        questions: [
+          { question: "Q1?", options: [{ label: "A" }, { label: "B" }] },
+          { question: "Q2?", options: [{ label: "X" }, { label: "Y" }] },
+        ]
+      }
+    });
+
+    bridge.requestElicitation(perm, (entry, answers) => { resolvedAnswers = answers; }, {});
+    bridge._testHandleTextReply({ text: "y" });
+
+    assert.ok(resolvedAnswers && typeof resolvedAnswers === "object");
+    assert.strictEqual(resolvedAnswers["Q1?"], "Defer to agent");
+    assert.strictEqual(resolvedAnswers["Q2?"], "Defer to agent");
+    assert.strictEqual(bridge.hasPending(), false);
+  });
+
   it("falls back to 'Option N' when selected option has no label", () => {
     const client = makeMockQQBotClient();
     const bridge = createBridge(client);

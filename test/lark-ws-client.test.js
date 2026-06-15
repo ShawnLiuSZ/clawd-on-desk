@@ -70,12 +70,13 @@ describe("lark-ws-client: event mappers", () => {
     assert.strictEqual(out.chatId, "oc_1");
   });
 
-  it("maps card.action.trigger to {permId,action,chatId}", () => {
+  it("maps card.action.trigger to {permId,action,chatId,senderId}", () => {
     const out = mapCardActionEvent({
       action: { value: { permId: "lark_xyz", action: "allow" } },
       context: { open_chat_id: "oc_777" },
+      operator: { open_id: "ou_clicker" },
     });
-    assert.deepStrictEqual(out, { permId: "lark_xyz", action: "allow", chatId: "oc_777" });
+    assert.deepStrictEqual(out, { permId: "lark_xyz", action: "allow", chatId: "oc_777", senderId: "ou_clicker" });
   });
 
   it("tolerates snake_case + top-level open_chat_id in card events", () => {
@@ -83,7 +84,18 @@ describe("lark-ws-client: event mappers", () => {
       action: { value: { perm_id: "lark_q", behavior: "deny" } },
       open_chat_id: "oc_888",
     });
-    assert.deepStrictEqual(out, { permId: "lark_q", action: "deny", chatId: "oc_888" });
+    assert.deepStrictEqual(out, { permId: "lark_q", action: "deny", chatId: "oc_888", senderId: "" });
+  });
+
+  it("extracts the operator identity as senderId (open_id, then union/user)", () => {
+    assert.strictEqual(
+      mapCardActionEvent({ action: { value: { permId: "p" } }, operator: { union_id: "on_u" } }).senderId,
+      "on_u"
+    );
+    assert.strictEqual(
+      mapCardActionEvent({ action: { value: { permId: "p" } }, operator: { user_id: "uid" } }).senderId,
+      "uid"
+    );
   });
 });
 
@@ -128,8 +140,9 @@ describe("lark-ws-client: connector", () => {
     const ack = await handlers["card.action.trigger"]({
       action: { value: { permId: "lark_1", action: "allow" } },
       context: { open_chat_id: "oc_1" },
+      operator: { open_id: "ou_a" },
     });
-    assert.deepStrictEqual(cards, [{ permId: "lark_1", action: "allow", chatId: "oc_1" }]);
+    assert.deepStrictEqual(cards, [{ permId: "lark_1", action: "allow", chatId: "oc_1", senderId: "ou_a" }]);
     // Returns a toast ack so the Feishu client doesn't time out.
     assert.strictEqual(ack.toast.type, "success");
   });

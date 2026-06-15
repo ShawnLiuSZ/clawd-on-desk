@@ -97,6 +97,16 @@ describe("lark-bot-settings: normalizeLarkBot", () => {
     assert.strictEqual(result.chatId, "");
   });
 
+  it("preserves approverOpenId and defaults it to empty", () => {
+    assert.strictEqual(normalizeLarkBot({ approverOpenId: "ou_owner" }).approverOpenId, "ou_owner");
+    assert.strictEqual(normalizeLarkBot({}).approverOpenId, "");
+  });
+
+  it("validate accepts approverOpenId string and rejects non-string", () => {
+    assert.strictEqual(validateLarkBot({ approverOpenId: "ou_owner" }).status, "ok");
+    assert.strictEqual(validateLarkBot({ approverOpenId: 5 }).status, "error");
+  });
+
   it("clamps approvalTimeoutMs to max 600000", () => {
     const result = normalizeLarkBot({ approvalTimeoutMs: 999999 });
     assert.strictEqual(result.approvalTimeoutMs, 600000);

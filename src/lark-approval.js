@@ -44,15 +44,31 @@ function createLarkApprovalBridge(larkBotClient, options = {}) {
 
   const getAuthorizedChatId =
     typeof options.getAuthorizedChatId === "function" ? options.getAuthorizedChatId : null;
+  const getAuthorizedUserId =
+    typeof options.getAuthorizedUserId === "function" ? options.getAuthorizedUserId : null;
 
   // Enforcement is active only when the host wires an anchor getter (production
   // path). With no getter, behave as before (keeps unit tests host-agnostic).
   // Fail-closed: a known getter that returns empty rejects every decision.
-  function isAuthorizedSender(senderChatId) {
-    if (!getAuthorizedChatId) return true;
-    const authorized = String(getAuthorizedChatId() || "").trim();
-    if (!authorized) return false;
-    return String(senderChatId || "").trim() === authorized;
+  //
+  // User-level takes precedence over chat-level: chat_id is shared by all
+  // members of a group, so chat-only auth lets ANY member approve another's
+  // request. When an authorized USER open_id is known, only that user may
+  // resolve. The chat check remains as a fallback for configs bound before the
+  // approver open_id was captured (it re-captures on the next message).
+  function isAuthorizedSender(event) {
+    const senderId = event && typeof event === "object" ? event.senderId : undefined;
+    const chatId = event && typeof event === "object" ? event.chatId : event;
+    if (getAuthorizedUserId) {
+      const authUser = String(getAuthorizedUserId() || "").trim();
+      if (authUser) return String(senderId || "").trim() === authUser;
+    }
+    if (getAuthorizedChatId) {
+      const authChat = String(getAuthorizedChatId() || "").trim();
+      if (!authChat) return false;
+      return String(chatId || "").trim() === authChat;
+    }
+    return true;
   }
 
   const pendingApprovals = new Map();
@@ -93,7 +109,7 @@ function createLarkApprovalBridge(larkBotClient, options = {}) {
   function handleTextReply(message) {
     const parsed = parseTextReply(message && message.text);
     if (!parsed) return;
-    if (!isAuthorizedSender(message && message.chatId)) {
+    if (!isAuthorizedSender(message)) {
       logFn("lark-approval: ignored text reply from non-authorized sender");
       return;
     }
@@ -114,7 +130,7 @@ function createLarkApprovalBridge(larkBotClient, options = {}) {
     if (!event || !event.permId) return undefined;
     const entry = pendingApprovals.get(event.permId);
     if (!entry) return undefined;
-    if (!isAuthorizedSender(event.chatId)) {
+    if (!isAuthorizedSender(event)) {
       logFn(`lark-approval: ignored interaction from non-authorized sender for permId=${event.permId}`);
       return undefined;
     }

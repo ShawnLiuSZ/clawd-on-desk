@@ -1299,6 +1299,12 @@ function persistWechatTargetToSettings(target) {
   if (!_settingsController || !target || !target.userId) return;
   const current = _settingsController.get("wechatBot");
   if (!current || !current.enabled) return;
+  // Anchor pinning (mirrors persistQQBotOpenidToSettings): once a target user
+  // is established, never auto-overwrite it with a DIFFERENT sender. Otherwise
+  // any user who messages the bot could hijack the approval channel and flip
+  // getAuthorizedUserId() to themselves, defeating the bridge's sender gate.
+  // A different sender is ignored; the same user may refresh their contextToken.
+  if (current.userId && current.userId !== target.userId) return;
   if (current.userId === target.userId && current.contextToken === (target.contextToken || "")) return;
   try {
     _settingsController.applyUpdate("wechatBot", {
@@ -1339,7 +1345,16 @@ function getOrCreateWechatApprovalBridge() {
   if (_wechatApprovalBridge) return _wechatApprovalBridge;
   const client = getOrCreateWechatClient();
   if (!client) return null;
-  _wechatApprovalBridge = createWechatApprovalBridge(client, { log: console.log });
+  _wechatApprovalBridge = createWechatApprovalBridge(client, {
+    log: console.log,
+    // Single source of truth for the trust anchor: the persisted/configured
+    // target userId. Only this user may resolve approvals or be used as the
+    // send target. Mirrors the QQ bridge's getAuthorizedOpenid wiring.
+    getAuthorizedUserId: () => {
+      const c = _settingsController ? _settingsController.get("wechatBot") : null;
+      return (c && c.userId) || "";
+    },
+  });
   try { _wechatApprovalBridge.start(); } catch (err) {
     console.log(`wechat-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
   }
@@ -3935,6 +3950,12 @@ function getOrCreateLarkApprovalBridge() {
       const c = _settingsController ? _settingsController.get("larkBot") : null;
       return (c && c.chatId) || "";
     },
+    // User-level anchor: in a group chat, only this captured approver open_id
+    // may resolve. Takes precedence over the chat check (see isAuthorizedSender).
+    getAuthorizedUserId: () => {
+      const c = _settingsController ? _settingsController.get("larkBot") : null;
+      return (c && c.approverOpenId) || "";
+    },
   });
   try { _larkApprovalBridge.start(); } catch (err) {
     console.log(`lark-approval: bridge start failed — ${err && err.message ? err.message : String(err)}`);
@@ -3992,16 +4013,22 @@ function handleLarkIncomingMessage(msg) {
   // Auto-bind: the first chat the bot receives a message from becomes the
   // approval target (so the push side + isAuthorizedSender know where to go).
   const larkConfig = _settingsController ? _settingsController.get("larkBot") : null;
-  if (larkConfig && !larkConfig.chatId) {
+  // Auto-bind the chat AND capture the authorized approver (sender open_id) so
+  // group chats are gated to the binder, not all members. Both are pinned on
+  // first message; a later message re-captures the approver only if still empty.
+  if (larkConfig && (!larkConfig.chatId || !larkConfig.approverOpenId)) {
     const normalized = normalizeLarkBot(larkConfig);
-    _settingsController.applyUpdate("larkBot", { ...normalized, chatId: msg.chatId });
-    console.log(`lark-ws: auto-bound approval chat → ${msg.chatId}`);
+    const update = { ...normalized };
+    if (!normalized.chatId) update.chatId = msg.chatId;
+    if (!normalized.approverOpenId && msg.senderId) update.approverOpenId = msg.senderId;
+    _settingsController.applyUpdate("larkBot", update);
+    console.log(`lark-ws: auto-bound approval chat → ${update.chatId}${update.approverOpenId ? ` (approver ${String(update.approverOpenId).slice(0, 10)}…)` : ""}`);
   }
   // Text replies ("y/n CODE") are a fallback to card buttons.
   if (msg.text) {
     const bridge = getOrCreateLarkApprovalBridge();
     if (bridge && typeof bridge.handleTextReply === "function") {
-      bridge.handleTextReply({ text: msg.text, chatId: msg.chatId });
+      bridge.handleTextReply({ text: msg.text, chatId: msg.chatId, senderId: msg.senderId });
     }
   }
 }

@@ -176,6 +176,21 @@ function createWechatApprovalBridge(wechatClient, options = {}) {
   const logFn = typeof options.log === "function" ? options.log : () => {};
   const nowFn = typeof options.now === "function" ? options.now : () => Date.now();
 
+  const getAuthorizedUserId =
+    typeof options.getAuthorizedUserId === "function" ? options.getAuthorizedUserId : null;
+
+  // Enforcement is active only when the host wires an anchor getter (production
+  // path). With no getter, behave as before (keeps unit tests host-agnostic).
+  // Fail-closed: a known getter that returns empty rejects every decision.
+  // Mirrors qq-approval's isAuthorizedSender so the two channels share the same
+  // user-level trust model (the persisted target user is the sole approver).
+  function isAuthorizedSender(fromUserId) {
+    if (!getAuthorizedUserId) return true;
+    const authorized = String(getAuthorizedUserId() || "").trim();
+    if (!authorized) return false;
+    return String(fromUserId || "").trim() === authorized;
+  }
+
   const pendingApprovals = new Map();
   const shortCodeToPermId = new Map();
   let messageUnsub = null;
@@ -186,6 +201,13 @@ function createWechatApprovalBridge(wechatClient, options = {}) {
   // client has been polling since startup. Prefer the bridge's own capture,
   // fall back to the client's persistent one.
   function resolveTargetUserId() {
+    // When enforcement is active, the authorized anchor is the ONLY valid send
+    // target — never fall back to a client-captured sender, which could be an
+    // attacker. This keeps the approval card (and its short code) from leaking.
+    if (getAuthorizedUserId) {
+      const authorized = String(getAuthorizedUserId() || "").trim();
+      if (authorized) return authorized;
+    }
     if (lastFromUserId) return lastFromUserId;
     if (typeof wechatClient.getLastFromUserId === "function") {
       return wechatClient.getLastFromUserId() || "";
@@ -244,8 +266,16 @@ function createWechatApprovalBridge(wechatClient, options = {}) {
 
   function handleTextMessage(message) {
     if (!message || !message.text) return;
-    // Always track from_user_id, even for non-reply chatter — it's the send
-    // target for future approvals.
+    // Only an authorized sender may resolve approvals or become the send
+    // target. Without this gate, any user who messages the bot could approve
+    // another user's pending request, and an attacker's message could redirect
+    // approval cards/confirmations to themselves (target hijack).
+    if (!isAuthorizedSender(message.fromUserId)) {
+      logFn(`wechat-approval: ignored message from non-authorized sender`);
+      return;
+    }
+    // Track from_user_id, even for non-reply chatter — it's the send target for
+    // future approvals. Gated above so only the authorized user can set it.
     if (message.fromUserId) lastFromUserId = message.fromUserId;
 
     const text = String(message.text).trim();
