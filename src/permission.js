@@ -1166,8 +1166,9 @@ function cancelWechatApproval(permEntry) {
 }
 
 function maybeStartRemoteQQApproval(permEntry) {
-  if (!isRemoteApprovalActionable(permEntry)) return false;
-  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  permLog(`maybeStartRemoteQQApproval entered: tool=${permEntry?.toolName}, session=${permEntry?.sessionId?.slice(0, 8)}`);
+  if (!isRemoteApprovalActionable(permEntry)) { permLog(`maybeStartRemoteQQApproval: isRemoteApprovalActionable returned false`); return false; }
+  if (pendingPermissions.indexOf(permEntry) === -1) { permLog(`maybeStartRemoteQQApproval: pendingPermissions check failed`); return false; }
   // Honor the live enable toggle. The cached bridge keeps a stale client whose
   // isEnabled() ignores `enabled`, and disconnect() only closes the WS (cards
   // still go out over HTTP) — so the authoritative gate is the current settings
@@ -1175,9 +1176,9 @@ function maybeStartRemoteQQApproval(permEntry) {
   const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
     ? ctx.getQQBotConfig()
     : (ctx.qqBotConfig || null);
-  if (!qqConfig || !qqConfig.enabled) return false;
+  if (!qqConfig || !qqConfig.enabled) { permLog(`maybeStartRemoteQQApproval: qqConfig not found or disabled`); return false; }
   const bridge = getQQApprovalBridge();
-  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  if (!bridge || typeof bridge.requestApproval !== "function") { permLog(`maybeStartRemoteQQApproval: bridge not available (bridge=${!!bridge}, hasRequestApproval=${typeof bridge?.requestApproval})`); return false; }
   // start() is idempotent and subscribes the button/text-reply listeners — it
   // MUST run before a request or callbacks are never delivered. (The previous
   // `!bridge.hasPending` guard negated a function reference, so it never ran.)
@@ -1185,7 +1186,12 @@ function maybeStartRemoteQQApproval(permEntry) {
     try { bridge.start(); } catch {}
   }
   const resolveFn = (entry, behavior) => {
-    if (pendingPermissions.indexOf(entry) === -1) return;
+    if (pendingPermissions.indexOf(entry) === -1) {
+      permLog(`QQ resolveFn skipped: permEntry not in pendingPermissions (tool=${entry?.toolName}, behavior=${behavior})`);
+      permLog(`QQ resolveFn skipped: session=${entry?.sessionId}, createdAt=${entry?.createdAt ? new Date(entry.createdAt).toISOString() : '?'}`);
+      return;
+    }
+    permLog(`QQ resolveFn executing: behavior=${behavior}, tool=${entry.toolName}, session=${entry.sessionId}`);
     resolvePermissionEntry(entry, behavior);
   };
   try {
@@ -1353,7 +1359,11 @@ function applyPermissionSuggestion(perm, index, options = {}) {
       return;
     }
   const idx = pendingPermissions.indexOf(permEntry);
-  if (idx === -1) return;
+  if (idx === -1) {
+    permLog(`resolvePermissionEntry skipped: permEntry not in pendingPermissions (behavior=${behavior}, tool=${permEntry.toolName}, session=${permEntry.sessionId})`);
+    return;
+  }
+  permLog(`resolvePermissionEntry called: behavior=${behavior}, tool=${permEntry.toolName}, session=${permEntry.sessionId}, message=${message || '(none)'}`);
   cancelRemoteApproval(permEntry);
   // Symmetric with Telegram: once a decision is made (here, or via the desktop
   // bubble), retract the parallel QQ approval so its card can't still be acted
@@ -1421,7 +1431,10 @@ function applyPermissionSuggestion(perm, index, options = {}) {
   }
 
   // Guard: client may have disconnected
-  if (!res || res.writableEnded || res.destroyed) return;
+  if (!res || res.writableEnded || res.destroyed) {
+    permLog(`resolvePermissionEntry res guard hit: behavior=${behavior}, agent=${permEntry.agentId || '?'}, tool=${permEntry.toolName}, session=${permEntry.sessionId}, res=${res ? 'exist' : 'null'}, writableEnded=${res?.writableEnded}, destroyed=${res?.destroyed}`);
+    return;
+  }
 
   if (permEntry.isCodex) {
     if (behavior === "no-decision") {

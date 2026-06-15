@@ -1218,7 +1218,7 @@ function getOrCreateQQBotClient() {
     _qqBotClient.updateConfig(normalized);
     return _qqBotClient;
   }
-  _qqBotClient = createQQBotClient(normalized, { log: console.log, WebSocket, getLang: () => lang });
+  _qqBotClient = createQQBotClient(normalized, { log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args), WebSocket, getLang: () => lang });
   if (!_qqBotOpenidListenerInstalled && typeof _qqBotClient.onOpenidDiscovered === "function") {
     _qqBotClient.onOpenidDiscovered((openid) => persistQQBotOpenidToSettings(openid));
     _qqBotOpenidListenerInstalled = true;
@@ -1234,7 +1234,7 @@ function getOrCreateQQApprovalBridge() {
   const client = getOrCreateQQBotClient();
   if (!client) return null;
   _qqApprovalBridge = createQQApprovalBridge(client, {
-    log: console.log,
+    log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args),
     // Single source of truth for the trust anchor: the persisted/configured
     // userOpenid in settings. The client no longer overwrites this with a
     // different sender (see qq-bot-client pairing logic).
@@ -1328,7 +1328,7 @@ function getOrCreateWechatClient() {
     _wechatClient.updateConfig(normalized);
     return _wechatClient;
   }
-  _wechatClient = createWechatIlinkClient(normalized, { log: console.log });
+  _wechatClient = createWechatIlinkClient(normalized, { log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args) });
   if (!_wechatTargetListenerInstalled && typeof _wechatClient.onTargetDiscovered === "function") {
     _wechatClient.onTargetDiscovered((target) => persistWechatTargetToSettings(target));
     _wechatTargetListenerInstalled = true;
@@ -1346,7 +1346,7 @@ function getOrCreateWechatApprovalBridge() {
   const client = getOrCreateWechatClient();
   if (!client) return null;
   _wechatApprovalBridge = createWechatApprovalBridge(client, {
-    log: console.log,
+    log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args),
     // Single source of truth for the trust anchor: the persisted/configured
     // target userId. Only this user may resolve approvals or be used as the
     // send target. Mirrors the QQ bridge's getAuthorizedOpenid wiring.
@@ -3935,8 +3935,8 @@ function getOrCreateLarkBotClient() {
     _larkBotClient.updateConfig(normalized);
     return _larkBotClient;
   }
-  _larkBotClient = createLarkBotClient(normalized, { log: console.log, getLang: () => lang });
-  _larkNotifier = createLarkNotifier(_larkBotClient, { log: console.log, getLang: () => lang });
+  _larkBotClient = createLarkBotClient(normalized, { log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args), getLang: () => lang });
+  _larkNotifier = createLarkNotifier(_larkBotClient, { log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args), getLang: () => lang });
   return _larkBotClient;
 }
 
@@ -3945,7 +3945,7 @@ function getOrCreateLarkApprovalBridge() {
   const client = getOrCreateLarkBotClient();
   if (!client) return null;
   _larkApprovalBridge = createLarkApprovalBridge(client, {
-    log: console.log,
+    log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args),
     getAuthorizedChatId: () => {
       const c = _settingsController ? _settingsController.get("larkBot") : null;
       return (c && c.chatId) || "";
@@ -4080,7 +4080,7 @@ function reconcileLarkRuntime() {
     appId: normalized.appId,
     appSecret: normalized.appSecret,
     region: normalized.region,
-    log: console.log,
+    log: (...args) => console.log(`[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}]`, ...args),
     onMessage: handleLarkIncomingMessage,
     onCardAction: handleLarkCardAction,
     sdk: require("@larksuiteoapi/node-sdk"),

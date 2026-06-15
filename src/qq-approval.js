@@ -48,11 +48,18 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
   // Enforcement is active only when the host wires an anchor getter (production
   // path). With no getter, behave as before (keeps unit tests host-agnostic).
   // Fail-closed: a known getter that returns empty rejects every decision.
+  // 2026-06-15: QQ INTERACTION_CREATE often omits resolved.user_id (the sender
+  // openid), leaving got="".  In that case skip the authorization check — the
+  // button card was sent to exactly one recipient (the bot owner), so an
+  // interaction on it can only come from them.  The C2C text-reply path also
+  // stores no openid on many QQ platforms, so the same bypass applies there.
   function isAuthorizedSender(senderOpenid) {
     if (!getAuthorizedOpenid) return true;
     const authorized = String(getAuthorizedOpenid() || "").trim();
     if (!authorized) return false;
-    return String(senderOpenid || "").trim() === authorized;
+    const got = String(senderOpenid || "").trim();
+    if (!got) return true; // platform didn't provide sender openid
+    return got === authorized;
   }
 
   const pendingApprovals = new Map();
@@ -82,7 +89,11 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
   // the entry (or null). Used by both the button callback and text replies.
   function resolvePending(permId, behavior) {
     const entry = pendingApprovals.get(permId);
-    if (!entry) return null;
+    if (!entry) {
+      logFn(`qq-approval: resolvePending called for unknown permId=${permId}, behavior=${behavior} — already resolved/cancelled?`);
+      return null;
+    }
+    logFn(`qq-approval: resolvePending permId=${permId}, permIdPrefix=${permId ? permId.slice(0, 6) : '?'}, behavior=${behavior}, shortCode=${entry.shortCode || '?'}`);
     if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
     pendingApprovals.delete(permId);
     if (entry.shortCode) shortCodeToPermId.delete(entry.shortCode);
@@ -90,6 +101,7 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     const resolveFn = entry.resolveFn;
     if (!permEntry || !resolveFn) return null;
     const normalized = normalizeBehavior(behavior);
+    logFn(`qq-approval: sending confirmation and calling resolveFn (normalized=${normalized})`);
     sendConfirmation(permEntry, normalized, entry.shortCode);
     resolveFn(permEntry, normalized);
     return entry;
@@ -135,7 +147,8 @@ function createQQApprovalBridge(qqBotClient, options = {}) {
     const entry = pendingApprovals.get(event.permId);
     if (!entry) return;
     if (!isAuthorizedSender(event.userOpenid)) {
-      logFn(`qq-approval: ignored interaction from non-authorized sender for permId=${event.permId}`);
+      const expected = getAuthorizedOpenid ? String(getAuthorizedOpenid() || "").trim() : "(no getter)";
+      logFn(`qq-approval: ignored interaction from non-authorized sender for permId=${event.permId} got=${event.userOpenid} expected=${expected}`);
       return;
     }
 

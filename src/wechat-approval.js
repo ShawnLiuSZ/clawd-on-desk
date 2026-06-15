@@ -49,34 +49,34 @@ function parseTextReply(text) {
 function buildTextRequest(permEntry, shortCode) {
   const tool = (permEntry && permEntry.toolName) ? String(permEntry.toolName) : "unknown";
   const ti = permEntry && permEntry.toolInput;
-  let detail = "";
+  let detailPart = "";
   if (ti && typeof ti === "object") {
-    if (ti.file_path) detail = `\n文件: ${String(ti.file_path)}`;
-    if (ti.command) detail = `\n命令: ${String(ti.command).replace(/\s+/g, " ").slice(0, 300)}`;
-    else if (ti.new_string != null) detail = `\n修改: ${String(ti.file_path || "")} ${String(ti.new_string).slice(0, 200)}`;
-    else if (ti.content != null) detail = `\n内容: ${String(ti.content).slice(0, 200)}`;
-    else if (ti.pattern || ti.query) detail = `\n查询: ${String(ti.pattern || ti.query).slice(0, 200)}`;
+    if (ti.file_path) detailPart = String(ti.file_path);
+    if (ti.command) detailPart = String(ti.command).replace(/\s+/g, " ").slice(0, 300);
+    else if (ti.new_string != null) detailPart = `${String(ti.file_path || "")} ${String(ti.new_string).slice(0, 200)}`;
+    else if (ti.content != null) detailPart = String(ti.content).slice(0, 200);
+    else if (ti.pattern || ti.query) detailPart = String(ti.pattern || ti.query).slice(0, 200);
   }
   const sessionId = permEntry && permEntry.sessionId
     ? String(permEntry.sessionId).slice(-6) : "—";
 
-  const lines = [
-    `[Clawd] 权限请求 [${shortCode}]`,
-    `工具: ${tool}`,
-    detail ? `详情:${detail}` : null,
-    `会话: ${sessionId}`,
-    ``,
-    `回复 "y ${shortCode}" 允许 / "n ${shortCode}" 拒绝`,
+  const parts = [
+    `🔒 权限请求 [${shortCode}]`,
+    `🛠 ${tool}`,
+    detailPart && `📄 ${detailPart.trim()}`,
+    `💬 会话: ${sessionId}`,
+    `✅ "y ${shortCode}" ↳ 允许`,
+    `❌ "n ${shortCode}" ↳ 拒绝`,
   ].filter(Boolean);
 
-  return lines.join("\n");
+  return parts.join(" ---|||--- ");
 }
 
 function buildConfirmationText(permEntry, behavior, shortCode) {
   const tool = (permEntry && permEntry.toolName) ? String(permEntry.toolName) : "unknown";
   const emoji = behavior === "allow" ? "✅" : "❌";
   const label = behavior === "allow" ? "已允许" : "已拒绝";
-  return `${emoji} ${label} [${shortCode}]\n工具: ${tool}`;
+  return `${emoji} ${label} [${shortCode}] ---|||--- 🛠 ${tool}`;
 }
 
 // ── Elicitation (single/multi-select) over plain text ──
@@ -109,21 +109,20 @@ function buildElicitationRequest(toolInput, shortCode) {
   const input = toolInput && typeof toolInput === "object" ? toolInput : {};
   const questions = Array.isArray(input.questions) ? input.questions : [];
 
-  const lines = [`[Clawd] 选择请求 [${shortCode}]`];
+  const parts = [`❓ 选择请求 [${shortCode}]`];
   let no = 0;
   for (const q of questions) {
     if (!q || typeof q.question !== "string" || !q.question) continue;
-    const multi = q.multiSelect ? "（多选）" : "";
-    lines.push(`问题: ${q.question}${multi}`);
+    const multi = q.multiSelect ? "(多选)" : "";
+    parts.push(`📝 ${q.question} ${multi}`);
     const options = Array.isArray(q.options) ? q.options : [];
     for (const opt of options) {
       no += 1;
-      lines.push(`  ${no}. ${(opt && opt.label != null) ? String(opt.label) : ""}`);
+      parts.push(`${no}. ${(opt && opt.label != null) ? String(opt.label) : ""}`);
     }
   }
-  lines.push("");
-  lines.push(`回复编号选择（多选用逗号，如 "1,3 ${shortCode}"）`);
-  return lines.join("\n");
+  parts.push(`✉️ 回复编号（多选用逗号，如 "1,3 ${shortCode}"）`);
+  return parts.join(" ---|||--- ");
 }
 
 // Map selected global numbers back to per-question answer labels. Returns the
@@ -165,11 +164,11 @@ function buildElicitationAnswers(questions, numbers) {
 }
 
 function buildElicitationConfirmation(answers, shortCode) {
-  const parts = [];
+  const detail = [];
   for (const [q, a] of Object.entries(answers || {})) {
-    parts.push(`${q}: ${a}`);
+    detail.push(`${q}: ${a}`);
   }
-  return `✅ 已提交 [${shortCode}]\n${parts.join("\n")}`;
+  return `✅ 已提交 [${shortCode}] ---|||--- ${detail.join(" ---|||--- ")}`;
 }
 
 function createWechatApprovalBridge(wechatClient, options = {}) {

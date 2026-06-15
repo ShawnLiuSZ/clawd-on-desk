@@ -293,7 +293,7 @@ function startRemoteApproval(ctx, permEntry) {
 }
 
 function startRemoteQQApproval(ctx, permEntry) {
-  if (permEntry && permEntry.toolName === "ExitPlanMode") return;
+  if (permEntry && permEntry.toolName === "ExitPlanMode") { ctx.permLog(`startRemoteQQApproval: skip ExitPlanMode`); return; }
 
   // Elicitation (AskUserQuestion) requests use a separate QQ card with
   // option buttons rather than Allow/Deny.
