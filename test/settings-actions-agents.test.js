@@ -64,6 +64,36 @@ test("settings agent actions enable an agent and preserve sibling flags", () => 
   assert.strictEqual(result.commit.agents.codex.permissionMode, "intercept");
 });
 
+test("settings agent actions do not install files when enabling an uninstalled agent", () => {
+  const snapshot = prefs.getDefaults();
+  snapshot.agents["gemini-cli"] = {
+    integrationInstalled: false,
+    enabled: false,
+    permissionsEnabled: true,
+    notificationHookEnabled: true,
+  };
+  const calls = {
+    syncIntegrationForAgent: [],
+    startMonitorForAgent: [],
+  };
+  const deps = {
+    snapshot,
+    syncIntegrationForAgent: (agentId) => calls.syncIntegrationForAgent.push(agentId),
+    startMonitorForAgent: (agentId) => calls.startMonitorForAgent.push(agentId),
+  };
+
+  const result = agentCommands.setAgentFlag(
+    { agentId: "gemini-cli", flag: "enabled", value: true },
+    deps
+  );
+
+  assert.strictEqual(result.status, "ok");
+  assert.deepStrictEqual(calls.syncIntegrationForAgent, []);
+  assert.deepStrictEqual(calls.startMonitorForAgent, ["gemini-cli"]);
+  assert.strictEqual(result.commit.agents["gemini-cli"].enabled, true);
+  assert.strictEqual(result.commit.agents["gemini-cli"].integrationInstalled, false);
+});
+
 test("settings agent actions switch Codex permission mode and dismiss pending bubbles", () => {
   const snapshot = prefs.getDefaults();
   snapshot.agents.codex.permissionMode = "intercept";
@@ -132,6 +162,35 @@ test("settings agent actions install an integration and enable ingress", async (
   assert.deepStrictEqual(calls, ["copilot-cli", "monitor:copilot-cli"]);
   assert.strictEqual(result.commit.agents["copilot-cli"].integrationInstalled, true);
   assert.strictEqual(result.commit.agents["copilot-cli"].enabled, true);
+  assert.deepStrictEqual(result.commit.dismissedAgentInstallHints, {});
+  assert.deepStrictEqual(result.commit.dismissedAgentCleanupHints, {});
+});
+
+test("settings agent actions install reasonix integration and enable ingress", async () => {
+  const snapshot = prefs.getDefaults();
+  snapshot.agents.reasonix = {
+    integrationInstalled: false,
+    enabled: false,
+    permissionsEnabled: false,
+    notificationHookEnabled: true,
+  };
+  const calls = [];
+  const deps = {
+    snapshot,
+    syncIntegrationForAgent: async (agentId) => {
+      calls.push(agentId);
+      return { status: "ok", message: "Reasonix hooks installed" };
+    },
+    startMonitorForAgent: (agentId) => calls.push(`monitor:${agentId}`),
+  };
+
+  const result = await agentCommands.installAgentIntegration({ agentId: "reasonix" }, deps);
+
+  assert.strictEqual(result.status, "ok");
+  assert.strictEqual(result.message, "Reasonix hooks installed");
+  assert.deepStrictEqual(calls, ["reasonix", "monitor:reasonix"]);
+  assert.strictEqual(result.commit.agents.reasonix.integrationInstalled, true);
+  assert.strictEqual(result.commit.agents.reasonix.enabled, true);
   assert.deepStrictEqual(result.commit.dismissedAgentInstallHints, {});
   assert.deepStrictEqual(result.commit.dismissedAgentCleanupHints, {});
 });
