@@ -520,7 +520,6 @@ const plugin = async (ctx) => {
 
         if (event.type === "permission.asked") {
           handlePermissionAsked(event);
-          return;
         }
 
         cleanupSessionParentMap(event, _sessionParentById);
