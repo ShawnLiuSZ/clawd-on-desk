@@ -841,12 +841,15 @@ function buildPermissionBubblePayload(permEntry) {
     lang: ctx.lang,
     isElicitation: permEntry.isElicitation || false,
     isOpencode: permEntry.isOpencode || false,
+    isMiMoCode: permEntry.isMiMoCode || false,
     isAntigravity: permEntry.isAntigravity || false,
     // Provenance for the renderer: lets the bubble relabel Codex MCP tool calls
     // (issue #445) without touching approval semantics. Mirrors the flags above.
     isCodex: permEntry.isCodex || false,
     opencodeAlways: permEntry.opencodeAlwaysCandidates || [],
     opencodePatterns: permEntry.opencodePatterns || [],
+    mimocodeAlways: permEntry.mimocodeAlwaysCandidates || [],
+    mimocodePatterns: permEntry.mimocodePatterns || [],
     sessionFolder,
     sessionShortId,
   };
@@ -885,7 +888,7 @@ function isRemoteRichApprovalSupported(permEntry) {
 
 function isRemoteApprovalActionable(permEntry) {
   if (!permEntry || typeof permEntry !== "object") return false;
-  if (permEntry.isElicitation || permEntry.isCodexNotify || permEntry.isKimiNotify || permEntry.isOpencode || permEntry.isAntigravity || permEntry.isCopilotCli) return false;
+  if (permEntry.isElicitation || permEntry.isCodexNotify || permEntry.isKimiNotify || permEntry.isOpencode || permEntry.isMiMoCode || permEntry.isAntigravity || permEntry.isCopilotCli) return false;
   if (permEntry.toolName === "ExitPlanMode" || permEntry.toolName === "AskUserQuestion") return false;
   if (PASSTHROUGH_TOOLS.has(permEntry.toolName)) return false;
   // Headless sessions auto-deny locally; mirror that on the Telegram side so a
@@ -1199,6 +1202,23 @@ function applyPermissionSuggestion(perm, index, options = {}) {
     return;
   }
 
+  // MiMo Code: decisions go back via the plugin's reverse bridge, same as opencode.
+  if (permEntry.isMiMoCode) {
+    if (behavior === "no-decision") return;
+    let reply;
+    if (behavior === "deny") reply = "reject";
+    else if (permEntry.mimocodeAlwaysPicked) reply = "always";
+    else reply = "once";
+    replyMiMoCodePermission({
+      bridgeUrl: permEntry.mimocodeBridgeUrl,
+      bridgeToken: permEntry.mimocodeBridgeToken,
+      requestId: permEntry.mimocodeRequestId,
+      reply,
+      toolName: permEntry.toolName,
+    });
+    return;
+  }
+
   // Guard: client may have disconnected
   if (!res || res.writableEnded || res.destroyed) return;
 
@@ -1370,6 +1390,58 @@ function replyOpencodePermission({ bridgeUrl, bridgeToken, requestId, reply, too
   req.on("timeout", () => {
     req.destroy();
     permLog(`opencode reply timeout request=${requestId}`);
+  });
+  req.write(body);
+  req.end();
+}
+
+// Fire-and-forget POST to the MiMo Code plugin's reverse bridge.
+// MiMo Code is a fork of OpenCode with an identical plugin SDK, so the
+// bridge protocol is the same.
+function replyMiMoCodePermission({ bridgeUrl, bridgeToken, requestId, reply, toolName }) {
+  if (!bridgeUrl || !bridgeToken || !requestId) {
+    const missing = !bridgeUrl ? "bridgeUrl" : (!bridgeToken ? "bridgeToken" : "requestId");
+    permLog(`mimocode reply skipped: missing ${missing}`);
+    return;
+  }
+  const fullUrl = `${bridgeUrl.replace(/\/$/, "")}/reply`;
+  permLog(`mimocode reply: tool=${toolName || "?"} request=${requestId} reply=${reply} url=${fullUrl}`);
+
+  let parsed;
+  try { parsed = new URL(fullUrl); } catch {
+    permLog(`mimocode reply skipped: invalid bridge URL ${fullUrl}`);
+    return;
+  }
+  const body = JSON.stringify({ request_id: requestId, reply });
+  const req = http.request({
+    hostname: parsed.hostname,
+    port: parsed.port || 80,
+    path: parsed.pathname + parsed.search,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+      Authorization: `Bearer ${bridgeToken}`,
+    },
+    timeout: 5000,
+    family: 4,
+  }, (res) => {
+    let respBody = "";
+    res.setEncoding("utf8");
+    res.on("data", (chunk) => { if (respBody.length < 500) respBody += chunk; });
+    res.on("end", () => {
+      permLog(`mimocode reply status=${res.statusCode} request=${requestId} body=${respBody.trim() || "(empty)"}`);
+    });
+  });
+  req.on("error", (err) => {
+    const info = err
+      ? `code=${err.code || ""} errno=${err.errno || ""} syscall=${err.syscall || ""} msg=${err.message || ""}`
+      : "null";
+    permLog(`mimocode reply ERR ${info} request=${requestId}`);
+  });
+  req.on("timeout", () => {
+    req.destroy();
+    permLog(`mimocode reply timeout request=${requestId}`);
   });
   req.write(body);
   req.end();
@@ -1606,6 +1678,12 @@ function handleDecide(event, behavior) {
   // opencode "Always" button — map to reply="always" via resolvePermissionEntry
   if (behavior === "opencode-always") {
     perm.opencodeAlwaysPicked = true;
+    resolvePermissionEntry(perm, "allow");
+    return;
+  }
+  // mimocode "Always" button — same pattern as opencode
+  if (behavior === "mimocode-always") {
+    perm.mimocodeAlwaysPicked = true;
     resolvePermissionEntry(perm, "allow");
     return;
   }
@@ -1895,6 +1973,7 @@ return {
   dismissPermissionsForDnd,
   syncPermissionShortcuts,
   replyOpencodePermission,
+  replyMiMoCodePermission,
 };
 
 };

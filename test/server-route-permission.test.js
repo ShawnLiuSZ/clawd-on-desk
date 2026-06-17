@@ -58,6 +58,7 @@ function makeCtx(overrides = {}) {
     showPermissionBubble: [],
     sendPermissionResponse: [],
     replyOpencodePermission: [],
+    replyMiMoCodePermission: [],
     resolved: [],
     maybeStartRemoteApproval: [],
     addPendingPermission: [],
@@ -81,6 +82,7 @@ function makeCtx(overrides = {}) {
       res.end(behavior);
     },
     replyOpencodePermission: (payload) => calls.replyOpencodePermission.push(payload),
+    replyMiMoCodePermission: (payload) => calls.replyMiMoCodePermission.push(payload),
     resolvePermissionEntry: (entry, behavior, message) => calls.resolved.push({ entry, behavior, message }),
     maybeStartRemoteApproval: (entry) => calls.maybeStartRemoteApproval.push(entry),
     addPendingPermission(entry) {

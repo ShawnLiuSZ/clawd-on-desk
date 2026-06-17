@@ -105,6 +105,7 @@ function makeCtx(overrides = {}) {
     },
     showPermissionBubble: (entry) => shown.push(entry),
     replyOpencodePermission: () => {},
+    replyMiMoCodePermission: () => {},
     permLog: () => {},
     updateLog: () => {},
     _test: { pendingPermissions, sessions, updateSessionCalls, setStateCalls, shown },
