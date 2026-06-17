@@ -776,6 +776,55 @@ function show(data) {
     return;
   }
 
+  // MiMo Code branch — identical to opencode (MiMo Code is a fork of OpenCode).
+  if (data.isMiMoCode) {
+    headerTitle.textContent = bubbleText(data.lang, "permissionRequest");
+
+    const rawName = data.toolName || "unknown";
+    const displayName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+    toolPillText.textContent = displayName;
+    toolPill.setAttribute("data-tool", displayName);
+    toolPill.style.display = "";
+
+    const input = (data.toolInput && typeof data.toolInput === "object") ? data.toolInput : {};
+    let detail = "";
+    if (typeof input.filepath === "string" && input.filepath) {
+      detail = [...new Set(input.filepath.split(",").map(s => s.trim()).filter(Boolean))].join(", ");
+    } else if (typeof input.command === "string" && input.command) {
+      detail = input.command;
+    } else if (typeof input.url === "string" && input.url) {
+      detail = input.url;
+    } else if (Array.isArray(data.mimocodePatterns) && data.mimocodePatterns.length) {
+      detail = [...new Set(data.mimocodePatterns)].join(", ");
+    } else {
+      try { detail = JSON.stringify(input); } catch { detail = "(n/a)"; }
+    }
+    commandBlock.textContent = truncate(detail, 200);
+
+    btnAllow.textContent = bubbleText(data.lang, "allow");
+    btnDeny.textContent = bubbleText(data.lang, "deny");
+    btnAllow.style.display = "";
+    btnDeny.style.display = "";
+    btnAllow.disabled = false;
+    btnDeny.disabled = false;
+
+    suggestionsContainer.innerHTML = "";
+    if (Array.isArray(data.mimocodeAlways) && data.mimocodeAlways.length > 0) {
+      const btn = document.createElement("button");
+      btn.className = "btn-suggestion";
+      btn.textContent = bubbleText(data.lang, "alwaysAllowBlanket");
+      btn.title = bubbleText(data.lang, "alwaysAllowBlanketTitle");
+      btn.addEventListener("click", () => {
+        disableAll();
+        window.bubbleAPI.decide("mimocode-always");
+      });
+      suggestionsContainer.appendChild(btn);
+    }
+
+    revealCard();
+    return;
+  }
+
   if (elicitationMode) {
     // Elicitation mode — answer directly in the bubble, with terminal fallback.
     headerTitle.textContent = bubbleText(data.lang, "needsInput");

@@ -293,6 +293,24 @@ function createIntegrationSyncRuntime(options = {}) {
     }
   }
 
+  function syncMiMoCodePlugin() {
+    try {
+      if (typeof ctx.syncMiMoCodePluginImpl === "function") return ctx.syncMiMoCodePluginImpl();
+      const { registerMiMoCodePlugin } = require("../hooks/mimocode-install.js");
+      const result = registerMiMoCodePlugin({ silent: true });
+      if (result.added || result.created) {
+        console.log(`Clawd: synced mimocode plugin (added=${result.added}, created=${result.created})`);
+      }
+      if (result && result.reason === "mimocode-not-found") {
+        return asSkipped(result, "mimocode-not-found", "mimocode is not installed; skipped plugin sync");
+      }
+      return asOk(result);
+    } catch (err) {
+      console.warn("Clawd: failed to sync mimocode plugin:", err.message);
+      return { status: "error", message: err && err.message ? err.message : "Failed to sync mimocode plugin" };
+    }
+  }
+
   function syncPiExtension() {
     try {
       if (typeof ctx.syncPiExtensionImpl === "function") return ctx.syncPiExtensionImpl();
@@ -427,6 +445,7 @@ function createIntegrationSyncRuntime(options = {}) {
     codewhale: syncCodewhaleHooks,
     codex: syncCodexHooks,
     opencode: syncOpencodePlugin,
+    mimocode: syncMiMoCodePlugin,
     pi: syncPiExtension,
     openclaw: syncOpenClawPlugin,
     hermes: syncHermesPlugin,

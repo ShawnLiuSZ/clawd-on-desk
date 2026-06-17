@@ -45,6 +45,7 @@ const INSTALLABLE_AGENT_IDS = new Set([
   "qwen-code",
   "codewhale",
   "opencode",
+  "mimocode",
   "pi",
   "openclaw",
   "hermes",
