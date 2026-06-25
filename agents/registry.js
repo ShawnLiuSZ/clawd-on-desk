@@ -18,6 +18,7 @@ const openclaw = require("./openclaw");
 const hermes = require("./hermes");
 const qoder = require("./qoder");
 const reasonix = require("./reasonix");
+const mimocode = require("./mimocode");
 
 const AGENTS = [
   claudeCode,
@@ -32,6 +33,7 @@ const AGENTS = [
   qwenCode,
   codewhale,
   opencode,
+  mimocode,
   pi,
   openclaw,
   hermes,

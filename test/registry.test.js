@@ -19,6 +19,7 @@ describe("Agent Registry", () => {
       "qwen-code",
       "codewhale",
       "opencode",
+      "mimocode",
       "pi",
       "openclaw",
       "hermes",
@@ -262,6 +263,12 @@ describe("Agent Registry", () => {
     assert.strictEqual(reasonix.capabilities.notificationHook, true);
     assert.strictEqual(reasonix.capabilities.sessionEnd, true);
     assert.strictEqual(reasonix.capabilities.subagent, true);
+
+    const mimocode = registry.getAgent("mimocode");
+    assert.strictEqual(mimocode.capabilities.httpHook, false);
+    assert.strictEqual(mimocode.capabilities.permissionApproval, true);
+    assert.strictEqual(mimocode.capabilities.sessionEnd, true);
+    assert.strictEqual(mimocode.capabilities.subagent, true);
   });
 
   it("should have eventMap for hook-based agents", () => {
@@ -353,6 +360,19 @@ describe("Agent Registry", () => {
     assert.strictEqual(reasonix.eventMap.Notification, "notification");
     assert.strictEqual(reasonix.eventMap.PreCompact, "sweeping");
     assert.strictEqual(reasonix.eventMap.SessionEnd, "sleeping");
+
+    const mimocode = registry.getAgent("mimocode");
+    assert.strictEqual(mimocode.eventSource, "plugin-event");
+    assert.strictEqual(mimocode.eventMap.SessionStart, "idle");
+    assert.strictEqual(mimocode.eventMap.UserPromptSubmit, "thinking");
+    assert.strictEqual(mimocode.eventMap.PreToolUse, "working");
+    assert.strictEqual(mimocode.eventMap.PostToolUse, "working");
+    assert.strictEqual(mimocode.eventMap.PostToolUseFailure, "error");
+    assert.strictEqual(mimocode.eventMap.Stop, "attention");
+    assert.strictEqual(mimocode.eventMap.StopFailure, "error");
+    assert.strictEqual(mimocode.eventMap.PreCompact, "sweeping");
+    assert.strictEqual(mimocode.eventMap.PostCompact, "attention");
+    assert.strictEqual(mimocode.eventMap.SessionEnd, "sleeping");
   });
 
   it("treats Gemini CLI as a hook-only agent", () => {

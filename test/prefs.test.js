@@ -79,7 +79,7 @@ describe("prefs.getDefaults", () => {
       assert.strictEqual(d.agents[id].enabled, true, `${id} should default enabled`);
       assert.strictEqual(d.agents[id].integrationInstalled, true, `${id} should default installed`);
     }
-    for (const id of ["copilot-cli", "cursor-agent", "gemini-cli", "antigravity-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "codewhale", "opencode", "pi", "openclaw", "hermes", "qoder"]) {
+    for (const id of ["copilot-cli", "cursor-agent", "gemini-cli", "antigravity-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "codewhale", "opencode", "mimocode", "pi", "openclaw", "hermes", "qoder"]) {
       assert.strictEqual(d.agents[id].enabled, false, `${id} should default disabled`);
       assert.strictEqual(d.agents[id].integrationInstalled, false, `${id} should default not installed`);
     }
@@ -559,7 +559,7 @@ describe("prefs.validate", () => {
 
   it("seeds all known agents with notificationHookEnabled=true", () => {
     const d = prefs.getDefaults();
-    for (const id of ["claude-code", "codex", "copilot-cli", "cursor-agent", "gemini-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "codewhale", "opencode", "pi", "openclaw", "hermes", "qoder", "reasonix"]) {
+    for (const id of ["claude-code", "codex", "copilot-cli", "cursor-agent", "gemini-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "codewhale", "opencode", "mimocode", "pi", "openclaw", "hermes", "qoder", "reasonix"]) {
       assert.strictEqual(
         d.agents[id].notificationHookEnabled,
         true,

@@ -1,0 +1,25 @@
+module.exports = {
+  id: "mimocode",
+  name: "MiMo Code",
+  processNames: { win: ["mimo.exe"], mac: ["mimo"], linux: ["mimo"] },
+  eventSource: "plugin-event",
+  eventMap: {
+    SessionStart: "idle",
+    SessionEnd: "sleeping",
+    UserPromptSubmit: "thinking",
+    PreToolUse: "working",
+    PostToolUse: "working",
+    PostToolUseFailure: "error",
+    Stop: "attention",
+    StopFailure: "error",
+    PreCompact: "sweeping",
+    PostCompact: "attention",
+  },
+  capabilities: {
+    httpHook: false,
+    permissionApproval: true,
+    sessionEnd: true,
+    subagent: true,
+  },
+  pidField: "mimocode_pid",
+};

@@ -27,9 +27,21 @@ const {
   normalizeTelegramApproval,
 } = require("./telegram-approval-settings");
 const {
+  cloneDefaultLarkBot,
+  normalizeLarkBot,
+} = require("./lark-bot-settings");
+const {
   DEFAULT_HARDWARE_BUDDY_SETTINGS,
   normalizeHardwareBuddySettings,
 } = require("./hardware-buddy-settings");
+const {
+  cloneDefaultQQBot,
+  normalizeQQBot,
+} = require("./qq-bot-settings");
+const {
+  cloneDefaultWechatBot,
+  normalizeWechatBot,
+} = require("./wechat-bot-settings");
 const {
   NOTIFICATION_DEFAULT_SECONDS,
   UPDATE_DEFAULT_SECONDS,
@@ -247,6 +259,7 @@ const SCHEMA = {
       "qwen-code": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
       "codewhale": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
       "opencode": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
+      "mimocode": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
       "pi": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
       "openclaw": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
       "hermes": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
@@ -296,6 +309,21 @@ const SCHEMA = {
     type: "object",
     defaultFactory: () => cloneDefaultTelegramApproval(),
     normalize: normalizeTelegramApproval,
+  },
+  qqBot: {
+    type: "object",
+    defaultFactory: () => cloneDefaultQQBot(),
+    normalize: normalizeQQBot,
+  },
+  wechatBot: {
+    type: "object",
+    defaultFactory: () => cloneDefaultWechatBot(),
+    normalize: normalizeWechatBot,
+  },
+  larkBot: {
+    type: "object",
+    defaultFactory: () => cloneDefaultLarkBot(),
+    normalize: normalizeLarkBot,
   },
   // v0.9.0 migration state. transport defaults to null (undecided) so v0.8.x
   // users upgrading without this key fall onto the "detect legacy artefacts"

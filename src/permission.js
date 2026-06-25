@@ -841,12 +841,15 @@ function buildPermissionBubblePayload(permEntry) {
     lang: ctx.lang,
     isElicitation: permEntry.isElicitation || false,
     isOpencode: permEntry.isOpencode || false,
+    isMiMoCode: permEntry.isMiMoCode || false,
     isAntigravity: permEntry.isAntigravity || false,
     // Provenance for the renderer: lets the bubble relabel Codex MCP tool calls
     // (issue #445) without touching approval semantics. Mirrors the flags above.
     isCodex: permEntry.isCodex || false,
     opencodeAlways: permEntry.opencodeAlwaysCandidates || [],
     opencodePatterns: permEntry.opencodePatterns || [],
+    mimocodeAlways: permEntry.mimocodeAlwaysCandidates || [],
+    mimocodePatterns: permEntry.mimocodePatterns || [],
     sessionFolder,
     sessionShortId,
   };
@@ -883,10 +886,14 @@ function isRemoteRichApprovalSupported(permEntry) {
   return REMOTE_RICH_APPROVAL_AGENT_IDS.has(agentId);
 }
 
-function isRemoteApprovalActionable(permEntry) {
+function isRemoteApprovalActionable(permEntry, opts = {}) {
   if (!permEntry || typeof permEntry !== "object") return false;
-  if (permEntry.isElicitation || permEntry.isCodexNotify || permEntry.isKimiNotify || permEntry.isOpencode || permEntry.isAntigravity || permEntry.isCopilotCli) return false;
-  if (permEntry.toolName === "ExitPlanMode" || permEntry.toolName === "AskUserQuestion") return false;
+  // Elicitation / AskUserQuestion are normally local-only, but channels that can
+  // render a multi-select card (Lark) opt in via allowElicitation.
+  const allowElicitation = opts.allowElicitation === true;
+  if (!allowElicitation && (permEntry.isElicitation || permEntry.toolName === "AskUserQuestion")) return false;
+  if (permEntry.isCodexNotify || permEntry.isKimiNotify || permEntry.isOpencode || permEntry.isMiMoCode || permEntry.isAntigravity || permEntry.isCopilotCli) return false;
+  if (permEntry.toolName === "ExitPlanMode") return false;
   if (PASSTHROUGH_TOOLS.has(permEntry.toolName)) return false;
   // Headless sessions auto-deny locally; mirror that on the Telegram side so a
   // non-interactive Codex/CC run never sends an actionable approval card.
@@ -1011,6 +1018,10 @@ function cancelRemoteApproval(permEntry) {
   if (!controller) return;
   permEntry.remoteApprovalAbortController = null;
   try { controller.abort(); } catch {}
+  // Also cancel Lark approval if exists
+  if (typeof ctx.cancelLarkApproval === "function") {
+    try { ctx.cancelLarkApproval(permEntry); } catch {}
+  }
 }
 
 // "Go to terminal" path: drop the bubble, abort any in-flight Telegram prompt,
@@ -1022,6 +1033,8 @@ function dismissPermissionForTerminal(perm) {
   // Cancel before splicing so a late Telegram decision can't slip in between
   // the splice and the abort.
   cancelRemoteApproval(perm);
+  cancelQQApproval(perm);
+  cancelWechatApproval(perm);
   const idx = pendingPermissions.indexOf(perm);
   if (idx !== -1) {
     pendingPermissions.splice(idx, 1);
@@ -1104,6 +1117,218 @@ function maybeStartRemoteApproval(permEntry) {
   return true;
 }
 
+function getQQApprovalBridge() {
+  if (typeof ctx.getQQApprovalBridge === "function") {
+    try { return ctx.getQQApprovalBridge(); } catch (err) {
+      permLog(`qq approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.qqApprovalBridge || null;
+}
+
+function cancelQQApproval(permEntry) {
+  const bridge = getQQApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
+function getLarkApprovalBridge() {
+  if (typeof ctx.getLarkApprovalBridge === "function") {
+    try { return ctx.getLarkApprovalBridge(); } catch (err) {
+      permLog(`lark approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.larkApprovalBridge || null;
+}
+
+function cancelLarkApproval(permEntry) {
+  const bridge = getLarkApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
+function getWechatApprovalBridge() {
+  if (typeof ctx.getWechatApprovalBridge === "function") {
+    try { return ctx.getWechatApprovalBridge(); } catch (err) {
+      permLog(`wechat approval bridge lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return null;
+    }
+  }
+  return ctx.wechatApprovalBridge || null;
+}
+
+function cancelWechatApproval(permEntry) {
+  const bridge = getWechatApprovalBridge();
+  if (bridge && typeof bridge.cancelApproval === "function") {
+    try { bridge.cancelApproval(permEntry); } catch {}
+  }
+}
+
+function maybeStartRemoteQQApproval(permEntry) {
+  permLog(`maybeStartRemoteQQApproval entered: tool=${permEntry?.toolName}, session=${permEntry?.sessionId?.slice(0, 8)}`);
+  if (!isRemoteApprovalActionable(permEntry)) { permLog(`maybeStartRemoteQQApproval: isRemoteApprovalActionable returned false`); return false; }
+  if (pendingPermissions.indexOf(permEntry) === -1) { permLog(`maybeStartRemoteQQApproval: pendingPermissions check failed`); return false; }
+  // Honor the live enable toggle. The cached bridge keeps a stale client whose
+  // isEnabled() ignores `enabled`, and disconnect() only closes the WS (cards
+  // still go out over HTTP) — so the authoritative gate is the current settings
+  // value here, read fresh on every request.
+  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
+    ? ctx.getQQBotConfig()
+    : (ctx.qqBotConfig || null);
+  if (!qqConfig || !qqConfig.enabled) { permLog(`maybeStartRemoteQQApproval: qqConfig not found or disabled`); return false; }
+  const bridge = getQQApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") { permLog(`maybeStartRemoteQQApproval: bridge not available (bridge=${!!bridge}, hasRequestApproval=${typeof bridge?.requestApproval})`); return false; }
+  // start() is idempotent and subscribes the button/text-reply listeners — it
+  // MUST run before a request or callbacks are never delivered. (The previous
+  // `!bridge.hasPending` guard negated a function reference, so it never ran.)
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) {
+      permLog(`QQ resolveFn skipped: permEntry not in pendingPermissions (tool=${entry?.toolName}, behavior=${behavior})`);
+      permLog(`QQ resolveFn skipped: session=${entry?.sessionId}, createdAt=${entry?.createdAt ? new Date(entry.createdAt).toISOString() : '?'}`);
+      return;
+    }
+    permLog(`QQ resolveFn executing: behavior=${behavior}, tool=${entry.toolName}, session=${entry.sessionId}`);
+    resolvePermissionEntry(entry, behavior);
+  };
+  try {
+    bridge.requestApproval(permEntry, resolveFn, qqConfig);
+  } catch (err) {
+    permLog(`qq remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+function maybeStartRemoteWechatApproval(permEntry) {
+  if (!isRemoteApprovalActionable(permEntry)) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  // Honor the live enable toggle. The cached bridge can keep a stale client
+  // whose `enabled` was never flipped to false on disable, so gate on the
+  // current settings value read fresh on every request.
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  if (!wxConfig || !wxConfig.enabled) return false;
+  const bridge = getWechatApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    resolvePermissionEntry(entry, behavior);
+  };
+  try {
+    bridge.requestApproval(permEntry, resolveFn, wxConfig);
+  } catch (err) {
+    permLog(`wechat remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+function maybeStartRemoteQQElicitation(permEntry) {
+  if (!permEntry || !permEntry.isElicitation) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const qqConfig = (ctx.getQQBotConfig && typeof ctx.getQQBotConfig === "function")
+    ? ctx.getQQBotConfig()
+    : (ctx.qqBotConfig || null);
+  if (!qqConfig || !qqConfig.enabled) return false;
+  const bridge = getQQApprovalBridge();
+  if (!bridge || typeof bridge.requestElicitation !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const resolveFn = (entry, answers) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, answers);
+    resolvePermissionEntry(entry, "allow");
+  };
+  try {
+    bridge.requestElicitation(permEntry, resolveFn, qqConfig);
+  } catch (err) {
+    permLog(`qq remote elicitation failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+function maybeStartRemoteWechatElicitation(permEntry) {
+  if (!permEntry || !permEntry.isElicitation) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const wxConfig = (ctx.getWechatBotConfig && typeof ctx.getWechatBotConfig === "function")
+    ? ctx.getWechatBotConfig()
+    : (ctx.wechatBotConfig || null);
+  if (!wxConfig || !wxConfig.enabled) return false;
+  const bridge = getWechatApprovalBridge();
+  if (!bridge || typeof bridge.requestElicitation !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const resolveFn = (entry, answers) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, answers);
+    resolvePermissionEntry(entry, "allow");
+  };
+  try {
+    bridge.requestElicitation(permEntry, resolveFn, wxConfig);
+  } catch (err) {
+    permLog(`wechat remote elicitation failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+function maybeStartRemoteLarkApproval(permEntry) {
+  // Lark can render multi-select elicitation cards, so allow elicitation here.
+  if (!isRemoteApprovalActionable(permEntry, { allowElicitation: true })) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  // Honor the live enable toggle. larkBotClient.isEnabled() only checks
+  // isConfigured() (ignores `enabled`), so the authoritative gate is the current
+  // settings value, read fresh on every request.
+  const larkConfig = (ctx.getLarkBotConfig && typeof ctx.getLarkBotConfig === "function")
+    ? ctx.getLarkBotConfig()
+    : (ctx.larkBotConfig || null);
+  if (!larkConfig || !larkConfig.enabled) return false;
+  const bridge = getLarkApprovalBridge();
+  if (!bridge || typeof bridge.requestApproval !== "function") return false;
+  if (typeof bridge.start === "function") {
+    try { bridge.start(); } catch {}
+  }
+  const resolveFn = (entry, behavior) => {
+    if (pendingPermissions.indexOf(entry) === -1) return;
+    // Elicitation submit arrives as { type: "elicitation-submit", answers }.
+    // resolvePermissionEntry only understands string behaviors, so translate it
+    // the same way the desktop bubble's IPC handler does: stash the answers as
+    // resolvedUpdatedInput, then resolve "allow" (which sends updatedInput back).
+    if (entry.isElicitation && behavior && typeof behavior === "object" && behavior.type === "elicitation-submit") {
+      entry.resolvedUpdatedInput = buildElicitationUpdatedInput(entry.toolInput, behavior.answers);
+      resolvePermissionEntry(entry, "allow");
+      return;
+    }
+    resolvePermissionEntry(entry, behavior);
+  };
+  const isElicitation = !!permEntry.isElicitation && typeof bridge.requestElicitation === "function";
+  try {
+    if (isElicitation) {
+      bridge.requestElicitation(permEntry, resolveFn, larkConfig);
+    } else {
+      bridge.requestApproval(permEntry, resolveFn, larkConfig);
+    }
+  } catch (err) {
+    permLog(`lark remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+    return false;
+  }
+  return true;
+}
+
 function applyPermissionSuggestion(perm, index, options = {}) {
   const suggestion = perm && Array.isArray(perm.suggestions) ? perm.suggestions[index] : null;
   if (!suggestion) return false;
@@ -1137,8 +1362,17 @@ function applyPermissionSuggestion(perm, index, options = {}) {
       return;
     }
   const idx = pendingPermissions.indexOf(permEntry);
-  if (idx === -1) return;
+  if (idx === -1) {
+    permLog(`resolvePermissionEntry skipped: permEntry not in pendingPermissions (behavior=${behavior}, tool=${permEntry.toolName}, session=${permEntry.sessionId})`);
+    return;
+  }
+  permLog(`resolvePermissionEntry called: behavior=${behavior}, tool=${permEntry.toolName}, session=${permEntry.sessionId}, message=${message || '(none)'}`);
   cancelRemoteApproval(permEntry);
+  // Symmetric with Telegram: once a decision is made (here, or via the desktop
+  // bubble), retract the parallel QQ approval so its card can't still be acted
+  // on. No-op when QQ itself resolved (entry already removed from the bridge).
+  cancelQQApproval(permEntry);
+  cancelWechatApproval(permEntry);
 
   // Minimum display time: if bubble just appeared and dismiss is automatic
   // (client disconnect / terminal answer), delay so user can see it briefly
@@ -1199,8 +1433,28 @@ function applyPermissionSuggestion(perm, index, options = {}) {
     return;
   }
 
+  // MiMo Code: decisions go back via the plugin's reverse bridge, same as opencode.
+  if (permEntry.isMiMoCode) {
+    if (behavior === "no-decision") return;
+    let reply;
+    if (behavior === "deny") reply = "reject";
+    else if (permEntry.mimocodeAlwaysPicked) reply = "always";
+    else reply = "once";
+    replyMiMoCodePermission({
+      bridgeUrl: permEntry.mimocodeBridgeUrl,
+      bridgeToken: permEntry.mimocodeBridgeToken,
+      requestId: permEntry.mimocodeRequestId,
+      reply,
+      toolName: permEntry.toolName,
+    });
+    return;
+  }
+
   // Guard: client may have disconnected
-  if (!res || res.writableEnded || res.destroyed) return;
+  if (!res || res.writableEnded || res.destroyed) {
+    permLog(`resolvePermissionEntry res guard hit: behavior=${behavior}, agent=${permEntry.agentId || '?'}, tool=${permEntry.toolName}, session=${permEntry.sessionId}, res=${res ? 'exist' : 'null'}, writableEnded=${res?.writableEnded}, destroyed=${res?.destroyed}`);
+    return;
+  }
 
   if (permEntry.isCodex) {
     if (behavior === "no-decision") {
@@ -1370,6 +1624,58 @@ function replyOpencodePermission({ bridgeUrl, bridgeToken, requestId, reply, too
   req.on("timeout", () => {
     req.destroy();
     permLog(`opencode reply timeout request=${requestId}`);
+  });
+  req.write(body);
+  req.end();
+}
+
+// Fire-and-forget POST to the MiMo Code plugin's reverse bridge.
+// MiMo Code is a fork of OpenCode with an identical plugin SDK, so the
+// bridge protocol is the same.
+function replyMiMoCodePermission({ bridgeUrl, bridgeToken, requestId, reply, toolName }) {
+  if (!bridgeUrl || !bridgeToken || !requestId) {
+    const missing = !bridgeUrl ? "bridgeUrl" : (!bridgeToken ? "bridgeToken" : "requestId");
+    permLog(`mimocode reply skipped: missing ${missing}`);
+    return;
+  }
+  const fullUrl = `${bridgeUrl.replace(/\/$/, "")}/reply`;
+  permLog(`mimocode reply: tool=${toolName || "?"} request=${requestId} reply=${reply} url=${fullUrl}`);
+
+  let parsed;
+  try { parsed = new URL(fullUrl); } catch {
+    permLog(`mimocode reply skipped: invalid bridge URL ${fullUrl}`);
+    return;
+  }
+  const body = JSON.stringify({ request_id: requestId, reply });
+  const req = http.request({
+    hostname: parsed.hostname,
+    port: parsed.port || 80,
+    path: parsed.pathname + parsed.search,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+      Authorization: `Bearer ${bridgeToken}`,
+    },
+    timeout: 5000,
+    family: 4,
+  }, (res) => {
+    let respBody = "";
+    res.setEncoding("utf8");
+    res.on("data", (chunk) => { if (respBody.length < 500) respBody += chunk; });
+    res.on("end", () => {
+      permLog(`mimocode reply status=${res.statusCode} request=${requestId} body=${respBody.trim() || "(empty)"}`);
+    });
+  });
+  req.on("error", (err) => {
+    const info = err
+      ? `code=${err.code || ""} errno=${err.errno || ""} syscall=${err.syscall || ""} msg=${err.message || ""}`
+      : "null";
+    permLog(`mimocode reply ERR ${info} request=${requestId}`);
+  });
+  req.on("timeout", () => {
+    req.destroy();
+    permLog(`mimocode reply timeout request=${requestId}`);
   });
   req.write(body);
   req.end();
@@ -1609,6 +1915,12 @@ function handleDecide(event, behavior) {
     resolvePermissionEntry(perm, "allow");
     return;
   }
+  // mimocode "Always" button — same pattern as opencode
+  if (behavior === "mimocode-always") {
+    perm.mimocodeAlwaysPicked = true;
+    resolvePermissionEntry(perm, "allow");
+    return;
+  }
   // "suggestion:N" — user picked a permission suggestion
   if (typeof behavior === "string" && behavior.startsWith("suggestion:")) {
     const idx = parseInt(behavior.split(":")[1], 10);
@@ -1750,6 +2062,8 @@ function dismissInteractivePermissionWithoutDecision(perm, reason) {
     notifyPermissionsChanged("dismissed");
   }
   cancelRemoteApproval(perm);
+  cancelQQApproval(perm);
+  cancelWechatApproval(perm);
   if (perm._delayTimer) { clearTimeout(perm._delayTimer); perm._delayTimer = null; }
   if (perm.autoCloseTimer) { clearTimeout(perm.autoCloseTimer); perm.autoCloseTimer = null; }
   if (perm.abortHandler && perm.res) {
@@ -1885,6 +2199,12 @@ return {
   pendingPermissions, PASSTHROUGH_TOOLS,
   addPendingPermission, removePendingPermission,
   maybeStartRemoteApproval,
+  maybeStartRemoteQQApproval,
+  maybeStartRemoteQQElicitation,
+  maybeStartRemoteWechatApproval,
+  maybeStartRemoteWechatElicitation,
+  maybeStartRemoteLarkApproval,
+  cancelLarkApproval,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,
@@ -1895,6 +2215,7 @@ return {
   dismissPermissionsForDnd,
   syncPermissionShortcuts,
   replyOpencodePermission,
+  replyMiMoCodePermission,
 };
 
 };
