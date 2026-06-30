@@ -92,6 +92,16 @@ const SCHEMA = {
   // when keepSizeAcrossDisplays is enabled.
   savedPixelWidth: { type: "number", default: 0, validate: (v) => Number.isFinite(v) && v >= 0 },
   savedPixelHeight: { type: "number", default: 0, validate: (v) => Number.isFinite(v) && v >= 0 },
+  // #408: work area of the display the keep-size was *frozen* on (i.e. the
+  // realized origin). Kept separately from positionDisplay because that one
+  // tracks the LAST display the window sat on — after a "Send to display"
+  // the two diverge, and using positionDisplay as the frozen origin would
+  // clamp legitimate cross-display sizes back to the launch fallback.
+  savedPixelWorkArea: {
+    type: "object",
+    defaultFactory: () => null,
+    normalize: normalizeSavedPixelWorkArea,
+  },
   size: {
     type: "string",
     default: "P:9",
@@ -117,6 +127,13 @@ const SCHEMA = {
   showDock: { type: "boolean", default: false },
   manageClaudeHooksAutomatically: { type: "boolean", default: true },
   autoStartWithClaude: { type: "boolean", default: false },
+  // Codex approval awareness depends entirely on the official PermissionRequest
+  // hook (JSONL no longer infers approvals). These surface its health: the
+  // toggle gates the startup nudge, and LastNotified is the edge-trigger dedup
+  // signature (empty = healthy/never-warned) so a broken hook nags at most once
+  // per distinct breakage, not every launch. See codex-hook-health.js.
+  codexHookHealthNotifyEnabled: { type: "boolean", default: true },
+  codexHookHealthLastNotified: { type: "string", default: "" },
   // System-backed: actual truth lives in OS login items / autostart files.
   // `openAtLoginHydrated` starts false; main.js's startup hydrate helper imports
   // the current system value into prefs on first run, then flips this flag.
@@ -214,6 +231,19 @@ const SCHEMA = {
   keepSizeAcrossDisplays: { type: "boolean", default: false },
   // Free roam: when enabled and the pet is idle, it will wander around the screen
   freeRoam: { type: "boolean", default: false },
+  // #562: Windows-only. When ON, the pet floats ON TOP of a foreground
+  // fullscreen app (e.g. a borderless game) and stays draggable, instead of
+  // standing down below it (#538). Default ON — most users want to glance at
+  // the pet while gaming. OFF only restores the #538 stand-down, which depends
+  // on the game grabbing topmost: that fires for exclusive-fullscreen, but a
+  // borderless-fullscreen game never yields topmost, so the pet floats on top
+  // there regardless of this pref (a Windows platform limit — forcing the pet
+  // below via setAlwaysOnTop(false) scrambles z-order, so we don't). To remove
+  // the pet entirely the user hides it (Hide Pet). No settings UI as of #562
+  // (the toggle was a non-choice for borderless games — see
+  // settings-tab-general.js); this pref persists as an escape hatch and can be
+  // re-exposed.
+  fullscreenOverlay: { type: "boolean", default: true },
   // Text-window zoom (bubbles, HUD, dashboard, settings, resume input). The
   // pet itself scales via `size` and is never zoomed. `textScale` is the
   // global default; `textScaleByDisplay` overrides it per display id (the
@@ -665,6 +695,15 @@ function normalizeDismissedAgentHintMap(value) {
     if (typeof key === "string" && key && value[key] === true) out[key] = true;
   }
   return out;
+}
+
+function normalizeSavedPixelWorkArea(value) {
+  if (!value || typeof value !== "object") return null;
+  const w = Number(value.width);
+  const h = Number(value.height);
+  if (!Number.isFinite(w) || w <= 0) return null;
+  if (!Number.isFinite(h) || h <= 0) return null;
+  return { width: w, height: h };
 }
 
 function normalizePositionDisplay(value) {
