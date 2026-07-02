@@ -124,7 +124,7 @@ describe("wechat-approval — buildTextRequest", () => {
     assert.ok(text.includes("Bash"));
     assert.ok(text.includes("y AB12"));
     assert.ok(text.includes("n AB12"));
-    assert.ok(text.includes("Clawd"));
+    assert.ok(text.includes("权限请求"));
   });
 
   it("includes command detail for Bash", () => {
