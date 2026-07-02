@@ -448,11 +448,11 @@ function registerSettingsIpc(options = {}) {
     } catch {}
     return {
       version: app.getVersion(),
-      repoUrl: "https://github.com/rullerzhou-afk/clawd-on-desk",
+      repoUrl: "https://github.com/ShawnLiuSZ/clawd-on-desk",
       license: "AGPL-3.0",
       copyright: "\u00a9 2026 Ruller_Lulu",
       authorName: "Ruller_Lulu / \u9e7f\u9e7f",
-      authorUrl: "https://github.com/rullerzhou-afk",
+      authorUrl: "https://github.com/ShawnLiuSZ",
       heroSvgContent,
       pendingUpdateVersion,
       autoUpdateCheck,
