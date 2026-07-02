@@ -266,11 +266,16 @@ describe("package build config", () => {
       const workflow = fs.readFileSync(path.join(ROOT, ".github", "workflows", "build.yml"), "utf8");
       const releaseIndex = findWorkflowJobIndex(workflow, "release");
       assert.ok(releaseIndex >= 0, "workflow should define a release job");
-      const releaseGateIndex = workflow.indexOf("if: startsWith(github.ref, 'refs/tags/v')", releaseIndex);
-      const bodyPathIndex = workflow.indexOf("body_path: docs/releases/release-${{ github.ref_name }}.md", releaseIndex);
-      assert.ok(releaseGateIndex >= 0, "release job should be gated to v* tags");
+      const releaseJobBlock = workflow.slice(releaseIndex);
+      assert.match(
+        releaseJobBlock,
+        /if:.*startsWith\(github\.ref,\s*'refs\/tags\/v'\)/,
+        "release job should be gated to v* tags"
+      );
+      const bodyPathIndex = releaseJobBlock.indexOf("body_path: docs/releases/release-${{ github.ref_name }}.md");
       assert.ok(bodyPathIndex >= 0, "release job should still use tag-specific release notes");
-      assert.ok(releaseGateIndex < bodyPathIndex, "release job gate should run before release publication");
+      const gateMatch = releaseJobBlock.match(/if:.*startsWith\(github\.ref,\s*'refs\/tags\/v'\)/);
+      assert.ok(gateMatch && gateMatch.index < bodyPathIndex, "release job gate should run before release publication");
     });
 
     it("creates tag releases as drafts for final asset inspection", () => {
